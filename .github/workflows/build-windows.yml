@@ -1,0 +1,90 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+    paths-ignore: [ 'docs/**', '**.md' ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      # Every build gets its own version; THOREAU offers it as an update when it's newer than what's installed.
+      THOREAU_VERSION: 1.0.${{ github.run_number }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build -A x64 "-DTHOREAU_VERSION=$env:THOREAU_VERSION" -DTHOREAU_BUILD_TESTS=ON *>&1 | Tee-Object -FilePath configure.log
+          if ($LASTEXITCODE -ne 0) {
+            $msg = (Get-Content configure.log -Tail 60) -join "%0A"; Write-Output "::error title=configure::$msg"
+            exit 1
+          }
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --parallel -- /v:minimal *>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            $msg = (Select-String -Path build.log -Pattern "error" | Select-Object -First 60 | ForEach-Object { $_.Line }) -join "%0A"; Write-Output "::error title=build::$msg"
+            exit 1
+          }
+
+      - name: Engine tests (must pass to ship)
+        shell: pwsh
+        run: |
+          & "build/ThoreauTests_artefacts/Release/ThoreauTests.exe" *>&1 | Tee-Object -FilePath tests.log
+          $code = $LASTEXITCODE
+          Select-String -Path tests.log -Pattern "FAIL" | ForEach-Object { Write-Output "::error title=test::$($_.Line)" }
+          exit $code
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist, portable | Out-Null
+          Copy-Item "build/Thoreau_artefacts/Release/THOREAU.exe" portable/
+          Copy-Item README.md portable/
+          Copy-Item Resources/Fonts/*.txt portable/
+          Compress-Archive -Path portable/* -DestinationPath "dist/THOREAU-$env:THOREAU_VERSION-portable.zip"
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc "/DAppVersion=$env:THOREAU_VERSION" Installer\THOREAU.iss *>&1 | Tee-Object -FilePath iscc.log
+          if ($LASTEXITCODE -ne 0) {
+            $msg = (Get-Content iscc.log -Tail 40) -join "%0A"; Write-Output "::error title=installer::$msg"
+            exit 1
+          }
+          Get-ChildItem dist
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: THOREAU-Windows
+          path: dist/
+
+      - name: Publish update
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          if (-not $env:GH_TOKEN) {
+            Write-Output "::warning title=updates::Not published - add the RELEASES_TOKEN secret (see Installer/README.md)"
+            exit 0
+          }
+          $notes = git log -1 --pretty=%s
+          $notes | Out-File -Encoding utf8 notes.md
+          gh release create "v$env:THOREAU_VERSION" --repo ShallowMouse/Thoreau-Releases `
+            --title "THOREAU $env:THOREAU_VERSION" --notes-file notes.md `
+            "dist/THOREAU-Setup-$env:THOREAU_VERSION.exe" "dist/THOREAU-$env:THOREAU_VERSION-portable.zip"
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=updates::Publishing the release failed"; exit 1 }
+          Write-Output "::notice title=updates::Published THOREAU $env:THOREAU_VERSION"

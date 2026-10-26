@@ -3,6 +3,8 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include "Project.h"
 #include "TapeChase.h"
+#include "AcousticDrum.h"
+#include "KitBus.h"
 #include "HawthorneLink/NetSender.h"
 
 namespace thoreau
@@ -124,7 +126,11 @@ public:
     // Hawthorne Link
     bool setNetworkEnabled (bool on, const juce::String& name, juce::String& error);
     bool isNetworkEnabled() const noexcept     { return networkOn.load(); }
-    /** 12 extra mono channels, one per drum, after the stereo mix. Takes effect when the audio restarts. */
+    /** Message thread: after project.setKit() (or loading a project), so the mics and room follow. */
+    void kitChanged()                          { bus.setKit (project.kit.load()); }
+
+    /** 16 extra channels after the stereo mix: each drum's close mic (12), overheads (2), room and echo (2).
+        Takes effect when the audio restarts. */
     void setIndividualOuts (bool on) noexcept  { individualOuts = on; }
     bool getIndividualOuts() const noexcept    { return individualOuts.load(); }
     int getNetworkChannels() const noexcept    { return netChannels.load(); }
@@ -166,7 +172,11 @@ public:
     static constexpr double catchUpSeconds = 0.15;
 
 private:
-    struct TrackVoices { std::array<Voice, 2> v; int next = 0; };
+    struct TrackVoices
+    {
+        std::array<Voice, 2> v; int next = 0;            // analogue synth / samples
+        std::array<AcousticDrum, 2> drums; int cur = 0;  // acoustic: one rings on while a changed sound starts
+    };
     void trigger (int track, float velocity, double onset) noexcept;
     void renderChunk (float* const* outputs, int numOutputs, int start, int n) noexcept;
     void scheduleSpan (double scanFrom, double beat0, double beat1, int n, bool catchUp) noexcept;
@@ -174,6 +184,9 @@ private:
     void recordHit (int track, float velocity, double beat) noexcept;
 
     std::array<TrackVoices, kTracks> voices;
+    KitBus bus;
+    std::array<KitBus::Send, kTracks> sends;
+    uint32_t hitCount = 1;
     juce::AudioBuffer<float> trackBuf, mixBuf, netBuf;
     std::vector<const float*> netPtrs;
     std::atomic<double> sampleRate { 48000.0 };

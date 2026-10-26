@@ -180,6 +180,7 @@ static void testInternalClock()
 {
     std::printf ("[3] internal clock: hits on the beat at 97 BPM\n");
     Project pr;
+    pr.setKit (analogKit());
     juce::String err;
     CHECK (pr.loadSample (0, writeClickSample(), err), "sample: %s", err.toRawUTF8());
     for (auto& p : pr.patterns) p.clear();
@@ -218,6 +219,7 @@ static void testTapeSyncEndToEnd()
 {
     std::printf ("[4] tape sync end to end with Hawthorne's receiver (real sockets, ~16 s)\n");
     Project pr;
+    pr.setKit (analogKit());
     juce::String err;
     CHECK (pr.loadSample (0, writeClickSample(), err), "sample: %s", err.toRawUTF8());
     for (auto& p : pr.patterns) p.clear();
@@ -324,12 +326,244 @@ static void testTapeSyncEndToEnd()
 }
 #endif
 
+//==============================================================================
+static const char* kindName (Kind k)
+{
+    static const char* n[] = { "analog", "kick", "snare", "rimshot", "sidestick", "brush", "sweep", "tom", "hatClosed", "hatOpen",
+                               "hatPedal", "crash", "ride", "rideBell", "china", "splash", "gong", "tambourine", "claps", "syndrum", "cowbell" };
+    return n[(int) k];
+}
+
+static void testKitPieces()
+{
+    std::printf ("[5] every drum of every kit: sounds, stays finite, rings out, sensible level\n");
+    const bool table = juce::SystemStats::getEnvironmentVariable ("THOREAU_KIT_TABLE", {}).isNotEmpty();
+    int pieces = 0;
+    double worstCpu = 0.0;
+    for (int k = 0; k < (int) kits().size(); ++k)
+    {
+        const auto& kit = kits()[(size_t) k];
+        if (! kit.acoustic) continue;
+        for (int t = 0; t < kTracks; ++t)
+        {
+            const auto& slot = kit.slots[(size_t) t];
+            for (float vel : { 1.0f, 0.35f })
+            {
+                AcousticDrum d;
+                d.prepare (kSR);
+                d.start (slot.model, {}, vel, 2.5, 1234u + (uint32_t) t);
+                std::vector<float> buf (512);
+                float peak = 0.0f; bool finite = true; int64 len = 0; double energy = 0.0;
+                const int64 limit = (int64) (kSR * (slot.model.kind == Kind::gong ? 60.0 : 20.0));
+                const auto t0 = juce::Time::getMillisecondCounterHiRes();
+                while (d.isActive() && len < limit)
+                {
+                    std::fill (buf.begin(), buf.end(), 0.0f);
+                    d.render (buf.data(), 512);
+                    for (float x : buf) { finite = finite && std::isfinite (x); peak = juce::jmax (peak, std::abs (x)); energy += (double) x * x; }
+                    len += 512;
+                    if (len == 512 * 40) d.excite (vel, 100.0, 99u);          // hit it again while it rings
+                }
+                const double secs = (double) len / kSR;
+                const double cpu = (juce::Time::getMillisecondCounterHiRes() - t0) / (secs * 1000.0);
+                worstCpu = juce::jmax (worstCpu, cpu);
+                const auto name = kit.name + " " + slot.name;
+                CHECK (finite, "%s: NaN/inf", name.toRawUTF8());
+                CHECK (peak > (vel > 0.5f ? 0.04f : 0.004f), "%s (vel %.2f) is too quiet: peak %.4f", name.toRawUTF8(), vel, peak);
+                CHECK (peak < 1.6f, "%s (vel %.2f) peak %.2f", name.toRawUTF8(), vel, peak);
+                CHECK (! d.isActive(), "%s never died away (%.1f s)", name.toRawUTF8(), secs);
+                if (table && vel > 0.5f)
+                    std::printf ("      %-18s %-12s %-10s peak %6.1f dB  rms %6.1f dB  %5.2f s  cpu %.3f\n", kit.name.toRawUTF8(), slot.name.toRawUTF8(),
+                                 kindName (slot.model.kind), juce::Decibels::gainToDecibels (peak),
+                                 juce::Decibels::gainToDecibels ((float) std::sqrt (energy / juce::jmax ((int64) 1, juce::jmin (len, (int64) (kSR * 0.2))))), secs, cpu);
+            }
+            ++pieces;
+        }
+    }
+    CHECK (worstCpu < 0.05, "a drum costs %.1f %% of a core", worstCpu * 100.0);
+    std::printf ("    %d drums x 2 velocities clean (re-hits while ringing too); worst %.2f %% of a core per drum\n", pieces, worstCpu * 100.0);
+}
+
+static double measureRt60 (const juce::AudioBuffer<float>& ir, int ch)
+{
+    // Schroeder backward integration; T60 from the -5 to -25 dB slope
+    const float* d = ir.getReadPointer (ch);
+    const int n = ir.getNumSamples();
+    std::vector<double> e ((size_t) n + 1, 0.0);
+    for (int i = n - 1; i >= 0; --i) e[(size_t) i] = e[(size_t) i + 1] + (double) d[i] * d[i];
+    int i5 = -1, i25 = -1;
+    for (int i = 0; i < n; ++i)
+    {
+        const double db = 10.0 * std::log10 (e[(size_t) i] / e[0] + 1e-30);
+        if (i5 < 0 && db <= -5.0) i5 = i;
+        if (i25 < 0 && db <= -25.0) { i25 = i; break; }
+    }
+    return i5 >= 0 && i25 > i5 ? 3.0 * (i25 - i5) / kSR : 0.0;
+}
+
+static void testKitRoomsAndBus()
+{
+    std::printf ("[6] kit rooms (decay time), analogue bus untouched, every kit's beat through the mixer\n");
+
+    // rooms decay as long as the kit says
+    double worstRt = 0.0;
+    for (auto& kit : kits())
+    {
+        auto ir = KitBus::makeRoom (kit.reverb, kSR, false);
+        bool finite = true;
+        for (int ch = 0; ch < 2; ++ch) for (int i = 0; i < ir.getNumSamples(); ++i) finite = finite && std::isfinite (ir.getSample (ch, i));
+        const double rt = measureRt60 (ir, 0);
+        const double err = std::abs (rt / kit.reverb.rt60 - 1.0);
+        worstRt = juce::jmax (worstRt, err);
+        CHECK (finite && err < 0.3, "%s room: T60 %.2f s, wanted %.2f s", kit.name.toRawUTF8(), rt, kit.reverb.rt60);
+    }
+
+    // THOREAU ANALOGUE's bus = exactly the panned close mics (old projects sound as they did)
+    {
+        KitBus bus;
+        bus.prepare (kSR, 256);
+        bus.setKit (analogKit());
+        juce::AudioBuffer<float> tr (kTracks, 256), out (2, 256);
+        juce::Random r (5);
+        std::array<KitBus::Send, kTracks> sends;
+        const auto& def = kitAt (analogKit());
+        for (int t = 0; t < kTracks; ++t)
+        {
+            sends[(size_t) t] = { def.slots[(size_t) t].pan, def.slots[(size_t) t].close, def.slots[(size_t) t].oh, def.slots[(size_t) t].room, def.slots[(size_t) t].fx };
+            for (int i = 0; i < 256; ++i) tr.setSample (t, i, r.nextFloat() - 0.5f);
+        }
+        KitBus::Knobs knobs { def.closeDb, def.ohDb, def.roomDb, def.comp, def.tape };
+        double worst = 0.0;
+        for (int b = 0; b < 4; ++b)
+        {
+            bus.process (tr.getArrayOfReadPointers(), sends, knobs, out.getWritePointer (0), out.getWritePointer (1), 256);
+            for (int i = 0; i < 256; ++i)
+            {
+                double l = 0, rr = 0;
+                for (int t = 0; t < kTracks; ++t)
+                {
+                    const double a = (sends[(size_t) t].pan + 1.0) * juce::MathConstants<double>::pi * 0.25;
+                    l += tr.getSample (t, i) * std::cos (a); rr += tr.getSample (t, i) * std::sin (a);
+                }
+                worst = juce::jmax (worst, std::abs (l - out.getSample (0, i)), std::abs (rr - out.getSample (1, i)));
+            }
+        }
+        CHECK (worst < 1e-5, "analogue bus changes the sound (%.2g)", worst);
+    }
+
+    // every kit's starter beat, through the whole engine
+    double worstCpu = 0.0;
+    for (int k = 0; k < (int) kits().size(); ++k)
+    {
+        Project pr;
+        pr.setKit (k);
+        for (auto& p : pr.patterns) p.clear();
+        pr.loadGroove (k, 0, 1);
+        pr.setSong ({ { 0, 2 }, { 1, 1 } });
+        DrumEngine e (pr);
+        e.setIndividualOuts (true);
+        e.prepare (kSR, 256, 0);
+        e.setPlayMode (PlayMode::song);
+        e.play();
+        juce::AudioBuffer<float> out (2, 256);
+        double sum = 0; float peak = 0; bool finite = true; int64 n = 0;
+        const auto t0 = juce::Time::getMillisecondCounterHiRes();
+        for (int b = 0; b < (int) (6.0 * kSR / 256); ++b)
+        {
+            e.process (out.getArrayOfWritePointers(), 2, 256);
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < 256; ++i) { const float x = out.getSample (ch, i); finite = finite && std::isfinite (x); peak = juce::jmax (peak, std::abs (x)); sum += (double) x * x; }
+            n += 512;
+        }
+        const double cpu = (juce::Time::getMillisecondCounterHiRes() - t0) / 6000.0;
+        worstCpu = juce::jmax (worstCpu, cpu);
+        const double rms = juce::Decibels::gainToDecibels ((float) std::sqrt (sum / n));
+        CHECK (finite && peak <= 1.0f && rms > -32.0 && rms < -6.0, "%s beat: peak %.2f, rms %.1f dB", kits()[(size_t) k].name.toRawUTF8(), peak, rms);
+        if (juce::SystemStats::getEnvironmentVariable ("THOREAU_KIT_TABLE", {}).isNotEmpty())
+            std::printf ("      %-18s beat: peak %5.1f dB  rms %5.1f dB  cpu %4.1f %%\n", kits()[(size_t) k].name.toRawUTF8(),
+                         juce::Decibels::gainToDecibels (peak), rms, cpu * 100.0);
+    }
+    CHECK (worstCpu < 0.35, "a kit costs %.0f %% of a core", worstCpu * 100.0);
+    std::printf ("    rooms within %.0f %% of their decay times; analogue bus exact; %d kits' beats clean; worst %.1f %% of a core\n",
+                 worstRt * 100.0, (int) kits().size(), worstCpu * 100.0);
+}
+
+/** THOREAU_DEMO=<folder>: renders each kit's beat (A A B) to <folder>/<kit>.wav. */
+static void renderDemos (const juce::File& folder)
+{
+    folder.createDirectory();
+    for (int k = 0; k < (int) kits().size(); ++k)
+    {
+        Project pr;
+        pr.setKit (k);
+        for (auto& p : pr.patterns) p.clear();
+        pr.loadGroove (k, 0, 1);
+        pr.setSong ({ { 0, 2 }, { 1, 1 }, { 0, 1 } });
+        DrumEngine e (pr);
+        e.prepare (kSR, 512, 0);
+        e.setPlayMode (PlayMode::song);
+        e.play();
+        const double secs = pr.songBeats() * 60.0 / pr.bpm.load() + 2.5;
+        juce::AudioBuffer<float> all (2, (int) (secs * kSR)), out (2, 512);
+        for (int pos = 0; pos < all.getNumSamples(); pos += 512)
+        {
+            const int m = juce::jmin (512, all.getNumSamples() - pos);
+            e.process (out.getArrayOfWritePointers(), 2, m);
+            for (int ch = 0; ch < 2; ++ch) all.copyFrom (ch, pos, out, ch, 0, m);
+        }
+        auto f = folder.getChildFile (juce::String (k).paddedLeft ('0', 2) + " " + juce::File::createLegalFileName (kits()[(size_t) k].name) + ".wav");
+        f.deleteFile();
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::OutputStream> os (f.createOutputStream());
+        if (auto* w = wav.createWriterFor (os.get(), kSR, 2, 24, {}, 0))
+        {
+            os.release();
+            std::unique_ptr<juce::AudioFormatWriter> writer (w);
+            writer->writeFromAudioSampleBuffer (all, 0, all.getNumSamples());
+        }
+        std::printf ("    %s\n", f.getFullPathName().toRawUTF8());
+    }
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI init;
+    const auto demo = juce::SystemStats::getEnvironmentVariable ("THOREAU_DEMO", {});
+    if (demo.isNotEmpty())
+    {
+        const int pieceKit = juce::SystemStats::getEnvironmentVariable ("THOREAU_DEMO_PIECES", "-1").getIntValue();
+        if (pieceKit >= 0)
+        {
+            // each drum of one kit on its own, raw (no mics / room): a hit, then a soft one
+            juce::File (demo).createDirectory();
+            for (int t = 0; t < kTracks; ++t)
+            {
+                const auto& slot = kitAt (pieceKit).slots[(size_t) t];
+                AcousticDrum d; d.prepare (kSR);
+                juce::AudioBuffer<float> b (1, (int) (kSR * 3));
+                b.clear();
+                d.start (slot.model, {}, 1.0f, 0.0, 7u);
+                for (int pos = 0; pos < b.getNumSamples(); pos += 256)
+                {
+                    if (pos == (int) (kSR * 1.5) / 256 * 256) d.excite (0.4f, 0.0, 8u);
+                    d.render (b.getWritePointer (0) + pos, juce::jmin (256, b.getNumSamples() - pos));
+                }
+                auto f = juce::File (demo).getChildFile ("piece " + juce::String (t).paddedLeft ('0', 2) + " " + juce::File::createLegalFileName (slot.name) + ".wav");
+                f.deleteFile();
+                juce::WavAudioFormat wav;
+                std::unique_ptr<juce::OutputStream> os (f.createOutputStream());
+                if (auto* w = wav.createWriterFor (os.get(), kSR, 1, 24, {}, 0)) { os.release(); std::unique_ptr<juce::AudioFormatWriter> wr (w); wr->writeFromAudioSampleBuffer (b, 0, b.getNumSamples()); }
+            }
+            return 0;
+        }
+        renderDemos (juce::File (demo));
+        return 0;
+    }
     testVoices();
     testSequencer();
     testInternalClock();
+    testKitPieces();
+    testKitRoomsAndBus();
    #if THOREAU_HAVE_HAWTHORNE
     testTapeSyncEndToEnd();
    #else

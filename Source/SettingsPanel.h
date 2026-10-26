@@ -35,7 +35,7 @@ private:
         DrumEngine& engine;
         Callbacks& cb;
         juce::ToggleButton linkToggle { "Send to Hawthorne (Hawthorne Link)" },
-                           indivToggle { "Each drum on its own channel too (2 + 12 channels)" },
+                           indivToggle { "Each drum and mic on its own channel too (18 channels)" },
                            localToggle { "Also play through this PC's audio outputs" },
                            followToggle { "Follow Hawthorne's reel: a THOREAU project per reel" };
         juce::TextEditor nameEditor;

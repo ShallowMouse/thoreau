@@ -5,6 +5,7 @@ namespace thoreau
 
 Project::Project()
 {
+    kits();                 // builds the kit table here, never on the audio thread
     for (auto& a : songPattern) a = 0;
     for (auto& a : songRepeats) a = 1;
     resetToDefault();
@@ -80,49 +81,58 @@ void Project::collectGarbage()
 }
 
 //==============================================================================
-void Project::resetToDefault()
+void Project::setKit (int k)
 {
-    static const float tunes[kTracks]  = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-    static const float decays[kTracks] = { 0.55f, 0.4f, 0.45f, 0.35f, 0.35f, 0.4f, 0.5f, 0.5f, 0.5f, 0.55f, 0.5f, 0.4f };
-    static const float levels[kTracks] = { 0, -2, -4, -6, -7, -8, -4, -4, -4, -9, -10, -9 };
-    static const float pans[kTracks]   = { 0, 0, 0.1f, -0.15f, 0.25f, 0.25f, -0.35f, 0.0f, 0.35f, -0.3f, 0.3f, -0.2f };
-
+    k = juce::jlimit (0, (int) kits().size() - 1, k);
+    const auto& def = kitAt (k);
+    kit = k;
     for (int t = 0; t < kTracks; ++t)
     {
         auto& tr = tracks[(size_t) t];
-        tr.tune = tunes[t];
-        tr.decay = decays[t];
-        tr.tone = 0.5f;
-        tr.snap = 0.5f;
-        tr.levelDb = levels[t];
-        tr.pan = pans[t];
-        tr.mute = false;
-        tr.solo = false;
-        tr.midiNote = defaultMidiNote (t);
+        const auto& s = def.slots[(size_t) t];
+        tr.pieceKit = -1;
+        tr.tune = 0.0f; tr.decay = 0.5f; tr.tone = 0.5f; tr.snap = 0.5f;
+        tr.levelDb = s.levelDb;
+        tr.pan = s.pan;
+        tr.midiNote = s.midi;
+    }
+    closeDb = def.closeDb; ohDb = def.ohDb; roomDb = def.roomDb; compAmount = def.comp; tapeAmount = def.tape;
+    changed();
+}
+
+void Project::loadGroove (int k, int a, int b)
+{
+    const auto& g = kitAt (k).groove;
+    auto fill = [this, &g] (int p, const std::array<const char*, kTracks>& rows)
+    {
+        auto& pt = patterns[(size_t) juce::jlimit (0, kPatterns - 1, p)];
+        pt.clear();
+        pt.length = juce::jlimit (1, kMaxSteps, g.length);
+        pt.stepsPerBeat = g.stepsPerBeat;
+        for (int t = 0; t < kTracks; ++t)
+            if (const char* r = rows[(size_t) t])
+                for (int s = 0; r[s] != 0 && s < kMaxSteps; ++s)
+                    pt.steps[(size_t) t][(size_t) s] = (uint8_t) (r[s] == 'x' ? 3 : r[s] == 'o' ? 2 : r[s] == 'g' ? 1 : 0);
+    };
+    fill (a, g.beat);
+    fill (b, g.fill);
+    bpm = g.bpm;
+    swing = g.swing;
+    changed();
+}
+
+void Project::resetToDefault()
+{
+    for (int t = 0; t < kTracks; ++t)
+    {
+        tracks[(size_t) t].mute = false;
+        tracks[(size_t) t].solo = false;
         clearSample (t);
     }
-
     for (auto& p : patterns) { p.clear(); p.length = 16; p.stepsPerBeat = 4; }
-
-    // A: a starter beat
-    auto set = [this] (int pat, int track, std::initializer_list<int> steps, int vel = 2)
-    {
-        for (int s : steps) patterns[(size_t) pat].steps[(size_t) track][(size_t) s] = (uint8_t) vel;
-    };
-    set (0, 0, { 0, 8, 10 });
-    set (0, 1, { 4, 12 });
-    set (0, 4, { 0, 2, 4, 6, 8, 10, 12 });
-    set (0, 4, { 2, 6, 10 }, 1);
-    set (0, 5, { 14 });
-    // B: fill
-    patterns[1].copyFrom (patterns[0]);
-    set (1, 1, { 13, 15 }, 1);
-    set (1, 6, { 14 }); set (1, 7, { 12 }); set (1, 8, { 10 });
-    set (1, 9, {});
-
-    bpm = 120.0;
+    setKit (defaultKit());
+    loadGroove (defaultKit(), 0, 1);
     beatsPerBar = 4;
-    swing = 50.0f;
     masterDb = 0.0f;
     setSong ({ { 0, 3 }, { 1, 1 } });
     songLoops = false;
@@ -133,7 +143,13 @@ void Project::resetToDefault()
 std::unique_ptr<juce::XmlElement> Project::toXml() const
 {
     auto root = std::make_unique<juce::XmlElement> ("ThoreauProject");
-    root->setAttribute ("formatVersion", 1);
+    root->setAttribute ("formatVersion", 2);
+    root->setAttribute ("kit", kitAt (kit.load()).name);
+    root->setAttribute ("closeDb", (double) closeDb.load());
+    root->setAttribute ("ohDb", (double) ohDb.load());
+    root->setAttribute ("roomDb", (double) roomDb.load());
+    root->setAttribute ("comp", (double) compAmount.load());
+    root->setAttribute ("tape", (double) tapeAmount.load());
     root->setAttribute ("bpm", bpm.load());
     root->setAttribute ("beatsPerBar", beatsPerBar.load());
     root->setAttribute ("swing", (double) swing.load());
@@ -155,6 +171,7 @@ std::unique_ptr<juce::XmlElement> Project::toXml() const
         e->setAttribute ("mute", tr.mute.load());
         e->setAttribute ("solo", tr.solo.load());
         e->setAttribute ("note", tr.midiNote.load());
+        if (tr.pieceKit.load() >= 0) e->setAttribute ("from", kitAt (tr.pieceKit.load()).name);
         const auto f = getSampleFile (t);
         if (f != juce::File()) e->setAttribute ("sample", f.getFullPathName());
     }
@@ -202,6 +219,20 @@ bool Project::fromXml (const juce::XmlElement& root, juce::String& error)
     resetToDefault();
     for (auto& p : patterns) p.clear();
 
+    // the kit (by name; projects from before kits were added use THOREAU ANALOGUE)
+    auto findKit = [] (const juce::String& name, int fallback)
+    {
+        for (int i = 0; i < (int) kits().size(); ++i)
+            if (kits()[(size_t) i].name == name) return i;
+        return fallback;
+    };
+    setKit (root.hasAttribute ("kit") ? findKit (root.getStringAttribute ("kit"), defaultKit()) : analogKit());
+    closeDb    = (float) juce::jlimit (-60.0, 12.0, root.getDoubleAttribute ("closeDb", closeDb.load()));
+    ohDb       = (float) juce::jlimit (-60.0, 12.0, root.getDoubleAttribute ("ohDb", ohDb.load()));
+    roomDb     = (float) juce::jlimit (-60.0, 12.0, root.getDoubleAttribute ("roomDb", roomDb.load()));
+    compAmount = (float) juce::jlimit (0.0, 1.0, root.getDoubleAttribute ("comp", compAmount.load()));
+    tapeAmount = (float) juce::jlimit (0.0, 1.0, root.getDoubleAttribute ("tape", tapeAmount.load()));
+
     bpm = juce::jlimit (20.0, 400.0, root.getDoubleAttribute ("bpm", 120.0));
     beatsPerBar = juce::jlimit (1, 32, root.getIntAttribute ("beatsPerBar", 4));
     swing = (float) juce::jlimit (50.0, 75.0, root.getDoubleAttribute ("swing", 50.0));
@@ -219,11 +250,12 @@ bool Project::fromXml (const juce::XmlElement& root, juce::String& error)
             tr.decay = (float) juce::jlimit (0.0, 1.0, e->getDoubleAttribute ("decay", 0.5));
             tr.tone  = (float) juce::jlimit (0.0, 1.0, e->getDoubleAttribute ("tone", 0.5));
             tr.snap  = (float) juce::jlimit (0.0, 1.0, e->getDoubleAttribute ("snap", 0.5));
-            tr.levelDb = (float) juce::jlimit (-60.0, 6.0, e->getDoubleAttribute ("level", 0.0));
-            tr.pan   = (float) juce::jlimit (-1.0, 1.0, e->getDoubleAttribute ("pan", 0.0));
+            tr.levelDb = (float) juce::jlimit (-60.0, 6.0, e->getDoubleAttribute ("level", tr.levelDb.load()));
+            tr.pan   = (float) juce::jlimit (-1.0, 1.0, e->getDoubleAttribute ("pan", tr.pan.load()));
             tr.mute  = e->getBoolAttribute ("mute", false);
             tr.solo  = e->getBoolAttribute ("solo", false);
-            tr.midiNote = juce::jlimit (0, 127, e->getIntAttribute ("note", defaultMidiNote (t)));
+            tr.midiNote = juce::jlimit (0, 127, e->getIntAttribute ("note", tr.midiNote.load()));
+            tr.pieceKit = e->hasAttribute ("from") ? findKit (e->getStringAttribute ("from"), -1) : -1;
             const auto path = e->getStringAttribute ("sample");
             if (path.isNotEmpty())
             {

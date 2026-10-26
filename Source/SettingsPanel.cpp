@@ -70,7 +70,7 @@ void SettingsPanel::LinkPage::paint (juce::Graphics& g)
     g.setFont (body (13.5f));
     g.drawFittedText (
         "In Hawthorne, open NETWORK and connect \"" + engine.netOut.getName() + "\". THOREAU shows up as a block of inputs: "
-        "1-2 are the stereo mix" + juce::String (engine.getIndividualOuts() ? ", 3-14 the drums one by one (kick, snare, clap ... cowbell)" : "")
+        "1-2 are the stereo mix" + juce::String (engine.getIndividualOuts() ? ", 3-14 the drums' close mics one by one (in pad order), 15-16 the overheads, 17-18 the room and echo" : "")
         + ". Patch them to tracks like any input.\n\n"
         "Set THOREAU's clock to HAWTHORNE and it follows the tape: press play on Hawthorne and the drums play from "
         "wherever the tape is, at the reel's tempo (THOREAU stores its tempo on the reel the first time). Hits land "

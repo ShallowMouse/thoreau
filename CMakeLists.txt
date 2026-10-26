@@ -32,6 +32,9 @@ endif()
 
 set(ENGINE_SOURCES
     Source/DrumVoices.cpp
+    Source/AcousticDrum.cpp
+    Source/Kits.cpp
+    Source/KitBus.cpp
     Source/DrumEngine.cpp
     Source/Project.cpp
     Source/TapeChase.cpp
@@ -67,6 +70,7 @@ if(THOREAU_BUILD_APP)
         Source/StepGrid.cpp
         Source/VoicePanel.cpp
         Source/SongPanel.cpp
+        Source/KitPanel.cpp
         Source/SettingsPanel.cpp
         Source/Updater.cpp)
 
@@ -82,6 +86,7 @@ if(THOREAU_BUILD_APP)
             ThoreauFonts
             juce::juce_audio_utils
             juce::juce_audio_formats
+            juce::juce_dsp
         PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_lto_flags
@@ -115,6 +120,7 @@ if(THOREAU_BUILD_TESTS)
         juce::juce_audio_devices
         juce::juce_audio_formats
         juce::juce_core
+        juce::juce_dsp
         juce::juce_events
         juce::juce_recommended_config_flags)
 endif()

@@ -33,8 +33,8 @@ private:
     DrumEngine& engine;
     int track = 0;
     std::array<Knob, 6> knobs;       // tune, decay, tone, snap, level, pan
-    juce::TextButton loadButton { "LOAD SAMPLE" }, clearButton { "USE SYNTH" }, auditionButton { "PLAY" };
-    juce::ComboBox noteBox;
+    juce::TextButton loadButton { "LOAD SAMPLE" }, clearButton { "USE KIT" }, auditionButton { "PLAY" };
+    juce::ComboBox noteBox, fromBox;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::Rectangle<int> titleArea, knobArea, sampleArea;
 

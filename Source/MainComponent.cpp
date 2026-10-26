@@ -221,9 +221,16 @@ MainComponent::MainComponent()
     voice.onMessage = [this] (const juce::String& m) { message (m); };
     song.onEdited = [this] { projectEdited(); };
     song.onEditPattern = [this] (int p) { selectPattern (p); };
+    kitPanel.onKitChanged = [this]
+    {
+        voice.refresh(); grid.repaint(); refreshPatternBar();
+        message ("kit: " + kitAt (project.kit).name + " - " + kitAt (project.kit).description);
+    };
+    kitPanel.onEdited = [this] { projectEdited(); };
     addAndMakeVisible (grid);
     addAndMakeVisible (voice);
     addAndMakeVisible (song);
+    addAndMakeVisible (kitPanel);
 
     barOneButton.setTooltip ("Bar 1 starts where the tape is now (stop the tape at the downbeat first)");
     barOneButton.onClick = [this] { setBarOne (engine.getTapePosition()); };
@@ -366,6 +373,8 @@ void MainComponent::afterProjectLoad()
     swingKnob.setValue (project.swing.load(), juce::dontSendNotification);
     masterKnob.setValue (project.masterDb.load(), juce::dontSendNotification);
     bpbBox.setSelectedId (project.beatsPerBar.load(), juce::dontSendNotification);
+    engine.kitChanged();
+    kitPanel.refresh();
     voice.refresh();
     song.refresh();
     refreshPatternBar();
@@ -400,6 +409,13 @@ void MainComponent::showFileMenu()
         afterProjectLoad();
         saveProject();
         message ("new project " + projectFile.getFileNameWithoutExtension());
+    });
+    m.addItem ("Put " + kitAt (project.kit).name + "'s starter beat in A and fill in B", [this]
+    {
+        project.loadGroove (project.kit, 0, 1);
+        afterProjectLoad();
+        selectPattern (0);
+        message ("starter beat for " + kitAt (project.kit).name + " in A, fill in B");
     });
     m.addItem ("Open...", [this]
     {
@@ -738,6 +754,8 @@ void MainComponent::resized()
     }
 
     bottom.removeFromTop (10);
+    kitPanel.setBounds (bottom.removeFromRight (side.getWidth()));
+    bottom.removeFromRight (10);
     voice.setBounds (bottom);
 }
 

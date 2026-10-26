@@ -119,10 +119,15 @@ void DrumEngine::prepare (double sr, int maxBlockSize, int outputLatency)
     sampleRate = sr;
     maxBlock = juce::jmax (64, maxBlockSize);
     for (auto& tv : voices)
+    {
         for (auto& v : tv.v) v.prepare (sr);
+        for (auto& d : tv.drums) d.prepare (sr);
+    }
     trackBuf.setSize (kTracks, maxBlock);
     mixBuf.setSize (2, maxBlock);
-    const int ch = individualOuts.load() ? 2 + kTracks : 2;
+    bus.prepare (sr, maxBlock);
+    if (bus.getKit() != project.kit.load()) bus.setKit (project.kit.load());
+    const int ch = individualOuts.load() ? 2 + kTracks + 4 : 2;
     netChannels = ch;
     netBuf.setSize (ch, maxBlock);
     netPtrs.assign ((size_t) ch, nullptr);
@@ -171,18 +176,48 @@ void DrumEngine::trigger (int track, float velocity, double onset) noexcept
 {
     auto& tr = project.tracks[(size_t) track];
     auto& tv = voices[(size_t) track];
+    const auto& slot = project.slotFor (track);
+    const auto* sample = tr.sample.load();
+    const auto params = tr.voiceParams();
+    const double at = juce::jmax (0.0, onset);
 
-    // one hit at a time per drum: the previous one fades out as this one starts
-    for (auto& v : tv.v)
-        if (v.isActive()) v.release (juce::jmax (0.0, onset));
-    // the closed hat chokes the open hat
-    if (instrumentOf (track) == Instrument::closedHat)
-        for (auto& v : voices[(size_t) Instrument::openHat].v)
-            if (v.isActive()) v.release (juce::jmax (0.0, onset));
+    // closing the hats (etc.) silences the drum this one chokes
+    if (juce::isPositiveAndBelow (slot.chokes, kTracks) && slot.chokes != track)
+    {
+        auto& other = voices[(size_t) slot.chokes];
+        for (auto& v : other.v)     if (v.isActive()) v.release (at);
+        for (auto& d : other.drums) if (d.isActive()) d.choke (at, 0.045);
+    }
 
-    auto& v = tv.v[(size_t) tv.next];
-    tv.next ^= 1;
-    v.trigger (instrumentOf (track), tr.voiceParams(), velocity, tr.sample.load(), onset);
+    if (sample != nullptr || slot.model.kind == Kind::analog)
+    {
+        // one hit at a time per drum: the previous one fades out as this one starts
+        for (auto& v : tv.v)
+            if (v.isActive()) v.release (at);
+        for (auto& d : tv.drums)
+            if (d.isActive()) d.choke (at, 0.02);
+        auto& v = tv.v[(size_t) tv.next];
+        tv.next ^= 1;
+        v.trigger (slot.model.kind == Kind::analog ? slot.model.analog : instrumentOf (track), params, velocity, sample, onset);
+    }
+    else
+    {
+        // acoustic: a drum that's ringing takes the new hit on top, like the real thing
+        for (auto& v : tv.v)
+            if (v.isActive()) v.release (at);
+        const uint32_t seed = (hitCount++ * 2654435761u) ^ (uint32_t) (track * 40503);
+        auto& d = tv.drums[(size_t) tv.cur];
+        if (onset >= 0.0 && d.isActive() && ! d.isChoked() && d.matches (slot.model, params))
+            d.excite (velocity, onset, seed);
+        else
+        {
+            tv.cur ^= 1;
+            auto& fresh = tv.drums[(size_t) tv.cur];
+            if (fresh.isActive()) fresh.choke (at, 0.03);   // the one before last: let go
+            fresh.start (slot.model, params, velocity, onset, seed);
+        }
+    }
+
     float prev = trackHit[(size_t) track].load (std::memory_order_relaxed);
     if (velocity > prev) trackHit[(size_t) track].store (velocity, std::memory_order_relaxed);
 }
@@ -362,20 +397,23 @@ void DrumEngine::renderChunk (float* const* outputs, int numOutputs, int start, 
     }
 
     //--------------------------------------------------------------------------
-    // Voices → tracks → mix
+    // Voices -> tracks -> the kit's mics and bus -> master
     bool anySolo = false;
     for (auto& tr : project.tracks) anySolo = anySolo || tr.solo.load (std::memory_order_relaxed);
 
-    mixBuf.clear (0, n);
-    float* L = mixBuf.getWritePointer (0);
-    float* R = mixBuf.getWritePointer (1);
-    const bool indiv = netChannels.load() > 2;
-
+    std::array<const float*, kTracks> trackPtrs {};
     for (int t = 0; t < kTracks; ++t)
     {
         float* tb = trackBuf.getWritePointer (t);
         juce::FloatVectorOperations::clear (tb, n);
-        for (auto& v : voices[(size_t) t].v) v.render (tb, n);
+        auto& tv = voices[(size_t) t];
+        for (auto& v : tv.v) v.render (tb, n);
+        for (auto& d : tv.drums)
+        {
+            if (! d.isActive()) continue;
+            // a fresh drum that was choked (the one before last) may still render a few ms
+            d.render (tb, n);
+        }
 
         const auto& tr = project.tracks[(size_t) t];
         const bool audible = ! tr.mute.load (std::memory_order_relaxed) && (! anySolo || tr.solo.load (std::memory_order_relaxed));
@@ -387,11 +425,20 @@ void DrumEngine::renderChunk (float* const* outputs, int numOutputs, int start, 
         for (int i = 0; i < n; ++i) peak = juce::jmax (peak, std::abs (tb[i]));
         if (peak > trackPeak[(size_t) t].load (std::memory_order_relaxed)) trackPeak[(size_t) t].store (peak, std::memory_order_relaxed);
 
-        const float pan = tr.pan.load (std::memory_order_relaxed);
-        const float a = (pan + 1.0f) * juce::MathConstants<float>::pi * 0.25f;    // constant power
-        juce::FloatVectorOperations::addWithMultiply (L, tb, std::cos (a), n);
-        juce::FloatVectorOperations::addWithMultiply (R, tb, std::sin (a), n);
+        const auto& slot = project.slotFor (t);
+        auto& sd = sends[(size_t) t];
+        sd.pan = tr.pan.load (std::memory_order_relaxed);
+        sd.close = slot.close; sd.oh = slot.oh; sd.room = slot.room; sd.fx = slot.fx;
+        trackPtrs[(size_t) t] = tb;
     }
+
+    KitBus::Knobs knobs;
+    knobs.closeDb = project.closeDb.load (std::memory_order_relaxed);
+    knobs.ohDb    = project.ohDb.load (std::memory_order_relaxed);
+    knobs.roomDb  = project.roomDb.load (std::memory_order_relaxed);
+    knobs.comp    = project.compAmount.load (std::memory_order_relaxed);
+    knobs.tape    = project.tapeAmount.load (std::memory_order_relaxed);
+    bus.process (trackPtrs.data(), sends, knobs, mixBuf.getWritePointer (0), mixBuf.getWritePointer (1), n);
 
     // Master: level, then a soft knee above -6 dBFS so a pile-up never clips harshly.
     const float master = juce::Decibels::decibelsToGain (project.masterDb.load (std::memory_order_relaxed), -59.9f);
@@ -422,9 +469,15 @@ void DrumEngine::renderChunk (float* const* outputs, int numOutputs, int start, 
     {
         netPtrs[0] = mixBuf.getReadPointer (0);
         netPtrs[1] = mixBuf.getReadPointer (1);
-        if (indiv)
+        if (nc >= 2 + kTracks + 4)
+        {
             for (int t = 0; t < kTracks; ++t)
                 netPtrs[(size_t) (2 + t)] = trackBuf.getReadPointer (t);
+            netPtrs[(size_t) (2 + kTracks)]     = bus.overheadStem (0);
+            netPtrs[(size_t) (2 + kTracks + 1)] = bus.overheadStem (1);
+            netPtrs[(size_t) (2 + kTracks + 2)] = bus.roomStem (0);
+            netPtrs[(size_t) (2 + kTracks + 3)] = bus.roomStem (1);
+        }
         netOut.push (netPtrs.data(), nc, n);
     }
 

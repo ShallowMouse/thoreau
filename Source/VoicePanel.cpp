@@ -61,12 +61,32 @@ VoicePanel::VoicePanel (DrumEngine& e) : engine (e)
     };
     addAndMakeVisible (loadButton);
 
-    clearButton.setTooltip ("Back to THOREAU's synthesised sound");
+    clearButton.setTooltip ("Back to the kit's own drum");
     clearButton.onClick = [this] { engine.project.clearSample (track); if (onEdited) onEdited(); refresh(); engine.audition (track, 0.9f); };
     addAndMakeVisible (clearButton);
 
     auditionButton.onClick = [this] { engine.audition (track, 0.9f); };
     addAndMakeVisible (auditionButton);
+
+    fromBox.addItem ("FROM THIS KIT", 1);
+    fromBox.addSeparator();
+    for (int i = 0; i < (int) kits().size(); ++i)
+        fromBox.addItem ("FROM " + kits()[(size_t) i].name, i + 2);
+    fromBox.setTooltip ("Play this pad's drum from another kit: mix and match pieces across kits");
+    fromBox.onChange = [this]
+    {
+        const int id = fromBox.getSelectedId();
+        if (id <= 0) return;
+        const int k = id == 1 ? -1 : id - 2;
+        auto& tr = engine.project.tracks[(size_t) track];
+        if (tr.pieceKit.load() == k) return;
+        tr.pieceKit = (k == engine.project.kit.load()) ? -1 : k;
+        engine.project.changed();
+        if (onEdited) onEdited();
+        refresh();
+        engine.audition (track, 0.9f);
+    };
+    addAndMakeVisible (fromBox);
 
     for (int n = 24; n <= 96; ++n) noteBox.addItem (noteName (n), n + 1);
     noteBox.setTooltip ("MIDI note that plays this drum");
@@ -115,6 +135,13 @@ void VoicePanel::refresh()
         knobs[(size_t) i].slider.updateText();
     }
     noteBox.setSelectedId (tr.midiNote.load() + 1, juce::dontSendNotification);
+    fromBox.setSelectedId (tr.pieceKit.load() < 0 ? 1 : tr.pieceKit.load() + 2, juce::dontSendNotification);
+    const bool acoustic = engine.project.slotFor (track).model.kind != Kind::analog && tr.sample.load() == nullptr;
+    knobs[1].label = acoustic ? "RING" : "DECAY";
+    knobs[3].label = acoustic ? "ATTACK" : "SNAP";
+    knobs[1].slider.setTooltip (acoustic ? "How long the drum rings (and how much it's muffled)" : "How long it rings");
+    knobs[2].slider.setTooltip (acoustic ? "Brightness: the head, and how the mic hears it" : "Brightness (kick: drive)");
+    knobs[3].slider.setTooltip (acoustic ? "Stick or beater: soft and round to hard and cracking" : "Attack: pitch sweep, noise, click");
     clearButton.setEnabled (tr.sample.load() != nullptr);
     repaint();
 }
@@ -122,7 +149,8 @@ void VoicePanel::refresh()
 void VoicePanel::resized()
 {
     auto r = getLocalBounds().reduced (24, 8);
-    titleArea = r.removeFromLeft (190);
+    titleArea = r.removeFromLeft (200);
+    fromBox.setBounds (titleArea.withTop (titleArea.getBottom() - 30).reduced (0, 3).withTrimmedRight (10));
     sampleArea = r.removeFromRight (230);
     knobArea = r;
 
@@ -152,14 +180,16 @@ void VoicePanel::paint (juce::Graphics& g)
     auto t = titleArea;
     g.setColour (Pequod::Colours::mustard);
     g.setFont (heading (22.0f));
-    g.drawText (instrumentName (track), t.removeFromTop (34).withTrimmedTop (10), juce::Justification::centredLeft);
+    g.drawText (engine.project.padName (track), t.removeFromTop (34).withTrimmedTop (10), juce::Justification::centredLeft);
     const auto file = engine.project.getSampleFile (track);
+    const int pk = engine.project.tracks[(size_t) track].pieceKit.load();
+    const auto& kitName = kitAt (pk >= 0 ? pk : engine.project.kit.load()).name;
     g.setFont (body (13.0f));
     g.setColour (Pequod::Colours::textDim);
-    g.drawFittedText (file != juce::File() ? "SAMPLE: " + file.getFileName() : "THOREAU synth voice",
-                      t.removeFromTop (36), juce::Justification::topLeft, 2);
+    g.drawFittedText (file != juce::File() ? "SAMPLE: " + file.getFileName() : kitName,
+                      t.removeFromTop (34), juce::Justification::topLeft, 2);
     g.setFont (heading (11.0f, false));
-    g.drawText ("> track " + juce::String (track + 1) + " of " + juce::String (kTracks), t.removeFromTop (18), juce::Justification::centredLeft);
+    g.drawText ("> pad " + juce::String (track + 1) + " of " + juce::String (kTracks), t.removeFromTop (18), juce::Justification::centredLeft);
 
     g.setFont (heading (12.0f));
     g.setColour (Pequod::Colours::text);

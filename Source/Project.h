@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DrumVoices.h"
+#include "Kits.h"
 #include <juce_data_structures/juce_data_structures.h>
 #include <memory>
 #include <vector>
@@ -24,6 +25,7 @@ struct TrackSettings
     std::atomic<float> levelDb { 0.0f }, pan { 0.0f };
     std::atomic<bool> mute { false }, solo { false };
     std::atomic<int> midiNote { 36 };
+    std::atomic<int> pieceKit { -1 };                   // play this drum from another kit (-1 = the project's kit)
     std::atomic<const Sample*> sample { nullptr };      // owned by the Project's SampleStore
 
     VoiceParams voiceParams() const noexcept { return { tune.load(), decay.load(), tone.load(), snap.load() }; }
@@ -63,6 +65,23 @@ public:
 
     std::array<TrackSettings, kTracks> tracks;
     std::array<Pattern, kPatterns> patterns;
+
+    // The kit: its drums, and its mics and mix bus (KitBus)
+    std::atomic<int> kit { 0 };
+    std::atomic<float> closeDb { 0.0f }, ohDb { -60.0f }, roomDb { -60.0f }, compAmount { 0.0f }, tapeAmount { 0.0f };
+
+    /** Message thread: change kit. Each drum's sound knobs, level, pan and MIDI note go back to
+        the kit's, as do the kit knobs. Patterns, mutes / solos and loaded samples stay. */
+    void setKit (int kitIndex);
+    /** Puts a kit's starter beat in pattern `a` and its fill in `b` (and its tempo and swing). */
+    void loadGroove (int kitIndex, int a, int b);
+    /** What a pad plays (any thread). */
+    const SlotDef& slotFor (int track) const noexcept
+    {
+        const int pk = tracks[(size_t) track].pieceKit.load (std::memory_order_relaxed);
+        return kitAt (pk >= 0 ? pk : kit.load (std::memory_order_relaxed)).slots[(size_t) track];
+    }
+    juce::String padName (int track) const { return slotFor (track).name; }
 
     std::atomic<double> bpm { 120.0 };
     std::atomic<int> beatsPerBar { 4 };

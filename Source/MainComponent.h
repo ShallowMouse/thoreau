@@ -6,6 +6,7 @@
 #include "StepGrid.h"
 #include "VoicePanel.h"
 #include "SongPanel.h"
+#include "KitPanel.h"
 #include "Updater.h"
 
 namespace thoreau
@@ -103,6 +104,7 @@ private:
     StepGrid grid { engine };
     VoicePanel voice { engine };
     SongPanel song { engine };
+    KitPanel kitPanel { engine };
 
     // sync panel
     juce::TextButton barOneButton { "BAR 1 = TAPE POSITION" }, nudgeEarly { "< 1 ms" }, nudgeLate { "1 ms >" };

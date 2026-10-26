@@ -164,7 +164,7 @@ void StepGrid::paint (juce::Graphics& g)
         g.drawRoundedRectangle (pad.reduced (0.5f), 3.0f, sel ? 1.5f : 1.0f);
         g.setFont (heading (13.0f));
         g.setColour (silent ? Pequod::Colours::textDim : Pequod::Colours::text);
-        g.drawText (instrumentName (t), pad.reduced (8, 0).toNearestInt(), juce::Justification::centredLeft);
+        g.drawText (engine.project.padName (t), pad.reduced (8, 0).toNearestInt(), juce::Justification::centredLeft);
         if (tr.sample.load() != nullptr)
         {
             g.setFont (body (10.0f, true));

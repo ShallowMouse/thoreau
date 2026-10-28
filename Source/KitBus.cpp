@@ -141,6 +141,15 @@ void KitBus::prepare (double sampleRate, int maxBlockSize)
     for (auto& v : ohDelay) v.assign (256, 0.0f);
     ohWrite = 0;
     ohDelaySamples = juce::jlimit (1, 200, (int) std::round (0.0012 * sr));     // overheads ~40 cm further away
+    const double apMs[2][3] = { { 0.61, 1.37, 2.29 }, { 0.71, 1.53, 2.11 } };
+    for (int ch = 0; ch < 2; ++ch)
+        for (int i = 0; i < 3; ++i)
+        {
+            auto& a = ohDiffuse[(size_t) ch][(size_t) i];
+            a.len = juce::jmax (1, (int) std::round (apMs[ch][i] * 0.001 * sr));
+            a.buf.assign ((size_t) a.len, 0.0f);
+            a.pos = 0;
+        }
     echoLen = (int) (sr * 2.1);
     for (auto& v : echo) v.assign ((size_t) echoLen, 0.0f);
     echoWrite = 0;
@@ -246,7 +255,9 @@ void KitBus::process (const float* const* tracks, const std::array<Send, kTracks
             for (int i = 0; i < n; ++i)
             {
                 line[(size_t) w] = o[i];
-                o[i] = ohHp[(size_t) ch].process (line[(size_t) ((w - ohDelaySamples + 256) & 255)]) * ohG;
+                float v = line[(size_t) ((w - ohDelaySamples + 256) & 255)];
+                for (auto& a : ohDiffuse[(size_t) ch]) v = a.process (v);
+                o[i] = ohHp[(size_t) ch].process (v) * ohG;
                 w = (w + 1) & 255;
             }
         }

@@ -108,7 +108,19 @@ private:
     // roughness: the partials' level wobbles with band-limited noise, smearing each one into a band
     // (a real cymbal has thousands of modes; this makes ~100 sound like a wash, not a chord)
     float rough = 0, roughLp1 = 0, roughLp2 = 0, roughCoef = 0;
-    bool roughLow = false;          // apply to the main group (hats) rather than the wash group
+    bool roughLow = false;          // apply to the main group rather than the wash group
+
+    // hi-hats: two plates clamped together sound like a bright band of noise (coloured by a few
+    // broad resonances that make each pair of hats its own), not a ringing chord
+    static constexpr int hatBands = 10;
+    bool hat = false;
+    std::array<Biquad, hatBands> hatBand;
+    std::array<float, hatBands> hatGain {};
+    Biquad hatHp1, hatHp2;
+    float hatNorm = 1, szNorm = 1;
+    float hatFast = 0, hatSlow = 0, hatSz = 0, hatFastK = 0, hatSlowK = 0, hatSzK = 0;
+    float hatSlowShare = 0.4f, hatSzMix = 0.5f;
+    float wobblePhase = 0, wobbleInc = 0, wobbleDepth = 0;
 
     // output
     float outGain = 1, lp = 0, lpCoef = 1, hpState = 0, hpCoef = 0;

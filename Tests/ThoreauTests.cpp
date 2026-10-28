@@ -525,6 +525,52 @@ static void renderDemos (const juce::File& folder)
     }
 }
 
+/** Hi-hats must sound like hats: bright, little low end, and noise-like (a wash, not a ringing chord). */
+static void testHats()
+{
+    std::printf ("[7] hi-hats: bright, little low end, a wash not a chord\n");
+    const int N = 8192;
+    double worstLow = 0, worstCentroid = 1e9, worstCentroidHigh = 0, worstFlat = 1;
+    for (auto& kit : kits())
+    {
+        if (! kit.acoustic) continue;
+        for (int t : { 4, 5 })
+        {
+            const auto& slot = kit.slots[(size_t) t];
+            AcousticDrum d; d.prepare (kSR);
+            d.start (slot.model, {}, 0.8f, 0.0, 3u);
+            std::vector<float> x ((size_t) N, 0.0f);
+            d.render (x.data(), N);
+            // spectrum: FFT of the whole hit (Hann window)
+            juce::dsp::FFT fft (13);
+            std::vector<float> buf ((size_t) N * 2, 0.0f);
+            for (int i = 0; i < N; ++i)
+                buf[(size_t) i] = x[(size_t) i] * (float) (0.5 - 0.5 * std::cos (2 * juce::MathConstants<double>::pi * i / N));
+            fft.performFrequencyOnlyForwardTransform (buf.data());
+            double low = 0, all = 0, cen = 0, logSum = 0, linSum = 0; int nFlat = 0;
+            for (int b = 1; b < N / 2; ++b)
+            {
+                const double f = b * kSR / N;
+                const double p = (double) buf[(size_t) b] * buf[(size_t) b] + 1e-20;
+                all += p; cen += p * f;
+                if (f < 1000.0) low += p;
+                if (f > 3000.0 && f < 12000.0) { logSum += std::log (p); linSum += p; ++nFlat; }
+            }
+            const double lowShare = low / all, centroid = cen / all;
+            const double flat = std::exp (logSum / nFlat) / (linSum / nFlat);      // 1 = white noise, ~0 = pure tones
+            worstLow = juce::jmax (worstLow, lowShare);
+            worstCentroid = juce::jmin (worstCentroid, centroid);
+            worstFlat = juce::jmin (worstFlat, flat);
+            const auto name = kit.name + " " + slot.name;
+            CHECK (lowShare < 0.06, "%s: %.0f %% of its energy below 1 kHz", name.toRawUTF8(), lowShare * 100);
+            CHECK (centroid > 4500.0 && centroid < 10500.0, "%s: centre %.0f Hz (a hat sits ~5-10 kHz)", name.toRawUTF8(), centroid);
+            worstCentroidHigh = juce::jmax (worstCentroidHigh, centroid);
+            CHECK (flat > 0.25, "%s: rings like a chord (flatness %.2f)", name.toRawUTF8(), flat);
+        }
+    }
+    std::printf ("    worst: %.1f %% below 1 kHz, centres %.0f-%.0f Hz, flatness %.2f (1 = pure wash)\n", worstLow * 100, worstCentroid, worstCentroidHigh, worstFlat);
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI init;
@@ -556,14 +602,57 @@ int main()
             }
             return 0;
         }
+        if (juce::SystemStats::getEnvironmentVariable ("THOREAU_DEMO_HATS", {}).isNotEmpty())
+        {
+            // hats alone (two bars), then the kit's beat (two bars)
+            juce::File (demo).createDirectory();
+            for (int k : { 7, 1, 9, 10, 12 })
+            {
+                Project pr; pr.setKit (k);
+                for (auto& p : pr.patterns) p.clear();
+                pr.loadGroove (k, 1, 2);
+                auto& h = pr.patterns[0];
+                h.length = 16; h.stepsPerBeat = 4;
+                const char* cl = "xgogxgogxgogxg..";
+                for (int i = 0; i < 16; ++i)
+                    h.steps[4][(size_t) i] = (uint8_t) (cl[i] == 'x' ? 3 : cl[i] == 'o' ? 2 : cl[i] == 'g' ? 1 : 0);
+                h.steps[5][14] = 2;
+                pr.bpm = 100.0; pr.swing = 50.0f;
+                pr.setSong ({ { 0, 2 }, { 1, 2 } });
+                DrumEngine e (pr); e.prepare (kSR, 512, 0); e.setPlayMode (PlayMode::song); e.play();
+                const double secs = pr.songBeats() * 60.0 / 100.0 + 1.5;
+                juce::AudioBuffer<float> all (2, (int) (secs * kSR)), out (2, 512);
+                for (int pos = 0; pos < all.getNumSamples(); pos += 512)
+                {
+                    const int m = juce::jmin (512, all.getNumSamples() - pos);
+                    e.process (out.getArrayOfWritePointers(), 2, m);
+                    for (int ch = 0; ch < 2; ++ch) all.copyFrom (ch, pos, out, ch, 0, m);
+                }
+                auto f = juce::File (demo).getChildFile ("hats " + juce::String (k).paddedLeft ('0', 2) + ".wav");
+                f.deleteFile();
+                juce::WavAudioFormat wav;
+                std::unique_ptr<juce::OutputStream> os (f.createOutputStream());
+                if (auto* w = wav.createWriterFor (os.get(), kSR, 2, 24, {}, 0)) { os.release(); std::unique_ptr<juce::AudioFormatWriter> wr (w); wr->writeFromAudioSampleBuffer (all, 0, all.getNumSamples()); }
+            }
+            return 0;
+        }
         renderDemos (juce::File (demo));
         return 0;
+    }
+    if (juce::SystemStats::getEnvironmentVariable ("THOREAU_ONLY_SYNC", {}).isNotEmpty())
+    {
+       #if THOREAU_HAVE_HAWTHORNE
+        testTapeSyncEndToEnd();
+       #endif
+        std::printf (failures == 0 ? "\nALL TESTS PASSED\n" : "\n%d FAILURE(S)\n", failures);
+        return failures == 0 ? 0 : 1;
     }
     testVoices();
     testSequencer();
     testInternalClock();
     testKitPieces();
     testKitRoomsAndBus();
+    testHats();
    #if THOREAU_HAVE_HAWTHORNE
     testTapeSyncEndToEnd();
    #else

@@ -150,6 +150,9 @@ void AcousticDrum::start (const DrumModel& m, const VoiceParams& p, float veloci
     trash = 0.0f;
     rough = roughLp1 = roughLp2 = 0.0f;
     roughLow = false;
+    hat = false;
+    hatFast = hatSlow = hatSz = 0.0f;
+    wobbleDepth = 0.0f;
     roughCoef = (float) (1.0 - std::exp (-twoPi * 900.0 / sr));
     wireLevel = wireEnv = 0.0f;
     chokeGain = 1.0f;
@@ -258,14 +261,62 @@ void AcousticDrum::start (const DrumModel& m, const VoiceParams& p, float veloci
         case Kind::hatOpen:
         case Kind::hatPedal:
         {
+            hat = true;
             const float s = pitch / 100.0f;
-            setupMetal (420.0f * s, 16000.0f, 96, -0.3f + (1.0f - bright) * 0.35f, ring, 0.25f, 2.0e5f, m.seed);
-            rough = 0.65f; roughLow = true;
-            filters[fTick].bandpass (sr, 6500.0 + 2500.0 * bright, 1.1); filterGain[fTick] = 2.4f;
-            filters[fSizzle].highpass (sr, 5500.0, 0.7); filterGain[fSizzle] = 1.0f;
-            filters[fBody].bandpass (sr, 650.0, 1.0); filterGain[fBody] = 2.5f;
-            outGain = m.kind == Kind::hatPedal ? 0.2f : 0.22f;
-            if (m.kind == Kind::hatOpen) { swellFloor = 0.6f; swellCoef = (float) (1.0 - std::exp (-1.0 / (0.02 * sr))); }
+            const bool closed = m.kind == Kind::hatClosed, pedal = m.kind == Kind::hatPedal;
+            Rng V (m.seed * 7919u + 17u);           // this pair of hats' own colour: the same every hit
+
+            // eight broad resonances across the top, two low "body" ones (the pedal chick lives there)
+            double var = 0.0;
+            const float tilt = (bright - 0.5f) * 1.4f;
+            for (int k = 0; k < hatBands; ++k)
+            {
+                double f, q, g;
+                if (k < 8)
+                {
+                    const double u = (k + 0.15 + 0.7 * V.next()) / 8.0;
+                    f = s * 2800.0 * std::pow (13000.0 / 2800.0, u);
+                    q = 1.8 + 2.6 * V.next() + (1.0f - bright) * 1.2;
+                    g = std::pow (f / 5000.0, (double) tilt) * (0.6 + 0.8 * V.next());
+                }
+                else
+                {
+                    f = s * (k == 8 ? 650.0 + 350.0 * V.next() : 1700.0 + 600.0 * V.next());
+                    q = k == 8 ? 1.3 : 1.6;
+                    g = (k == 8 ? 0.07 : 0.14) * (1.2f - bright * 0.6f) * (pedal ? 5.0 : 1.0);
+                }
+                f = juce::jmin (f, sr * 0.42);
+                hatBand[(size_t) k].bandpass (sr, f, q);
+                hatGain[(size_t) k] = (float) g;
+                // white noise in [-1, 1] (variance 1/3) through a 0 dB-peak band: noise bandwidth ~ (pi / 2) f / Q
+                var += g * g * (1.0 / 3.0) * (juce::MathConstants<double>::halfPi * f / q) / (sr * 0.5);
+            }
+            hatNorm = (float) (1.0 / std::sqrt (juce::jmax (1.0e-9, var)));
+
+            const double fc = juce::jmin (sr * 0.42, s * (6500.0 + 2500.0 * bright));
+            hatHp1.highpass (sr, fc, 0.7);
+            hatHp2.highpass (sr, fc, 0.7);
+            szNorm = (float) (1.0 / std::sqrt ((1.0 / 3.0) * juce::jmax (0.05, 1.0 - fc / (sr * 0.5))));
+
+            // the stick hitting the top plate: a click, lower when the stick is softer
+            filters[fTick].bandpass (sr, 3200.0 + 2600.0 * hard, 0.9); filterGain[fTick] = 2.0f;
+            filters[fBody].bandpass (sr, 900.0 * s, 1.4); filterGain[fBody] = 2.0f;
+
+            const double fastT = pedal ? 0.008 : closed ? 0.0035 + 0.002 * (1.0f - hard) : 0.006;
+            const double slowT = pedal ? 0.025 : juce::jmax (0.02, (double) ring) / 6.9;
+            hatFastK = (float) std::exp (-1.0 / (fastT * sr));
+            hatSlowK = (float) std::exp (-1.0 / (slowT * sr));
+            hatSzK   = (float) std::exp (-1.0 / (slowT * (closed ? 0.8 : 0.9) * sr));
+            hatSlowShare = pedal ? 0.25f : closed ? 0.45f : 0.7f;
+            hatSzMix = pedal ? 0.15f : 0.3f + 0.45f * bright;
+            if (m.kind == Kind::hatOpen)
+            {
+                wobbleDepth = 0.12f;                                    // the loose plates beat against each other
+                wobbleInc = (float) (twoPi * (5.5 + 2.5 * V.next()) / sr);
+                wobblePhase = (float) (twoPi * V.next());
+            }
+            lpHz = 7500.0f + 6500.0f * bright;          // recorded hats roll off up top
+            outGain = 1.0f;
             break;
         }
 
@@ -389,9 +440,9 @@ void AcousticDrum::start (const DrumModel& m, const VoiceParams& p, float veloci
             case Kind::brush:      trimDb = 0.0f;   break;
             case Kind::sweep:      trimDb = 3.0f;   break;
             case Kind::tom:        trimDb = -2.0f;  break;
-            case Kind::hatClosed:  trimDb = -17.0f;  break;
-            case Kind::hatOpen:    trimDb = -21.0f; break;
-            case Kind::hatPedal:   trimDb = -18.0f;  break;
+            case Kind::hatClosed:  trimDb = -2.0f;   break;
+            case Kind::hatOpen:    trimDb = -6.0f;  break;
+            case Kind::hatPedal:   trimDb = -3.0f;   break;
             case Kind::crash:      trimDb = -17.0f; break;
             case Kind::splash:     trimDb = -17.0f; break;
             case Kind::ride:       trimDb = -18.5f; break;
@@ -489,22 +540,18 @@ void AcousticDrum::excite (float velocity, double onset, uint32_t seed) noexcept
             break;
 
         case Kind::hatClosed:
-            addPulse (at, 0.00012 * wmul, amp, amp);
-            addBurst (at, amp * (0.3f + 0.4f * hard), 0.0035, 0.0, fTick);
-            addBurst (at, amp * 0.45f, ring * 0.5, 0.0005, fSizzle);
-            break;
-
         case Kind::hatOpen:
-            addPulse (at, 0.00012 * wmul, amp, amp);
-            addBurst (at, amp * 0.3f, 0.003, 0.0, fTick);
-            addBurst (at, amp * 0.5f, ring * 0.45, 0.002, fSizzle);
-            break;
-
         case Kind::hatPedal:
-            addPulse (at, 0.0009 * wmul, amp * 0.45f, amp * 0.45f);
-            addBurst (at, amp * 0.9f, 0.012, 0.0006, fBody);
-            addBurst (at, amp * 0.3f, 0.003, 0.0, fTick);
+        {
+            // a hit adds to whatever's still sounding (a re-hit on a ringing open hat swells it)
+            const bool pedal = model.kind == Kind::hatPedal;
+            hatFast += amp * (1.0f - hatSlowShare);
+            hatSlow += amp * hatSlowShare;
+            hatSz   += amp * hatSzMix * (0.4f + 0.6f * vel);             // harder = more sizzle
+            addBurst (at, amp * (pedal ? 0.15f : 0.25f + 0.35f * hard) * vel, 0.0009 + 0.0006 * (1.0f - hard), 0.0, fTick);
+            if (pedal) addBurst (at, amp * 0.8f, 0.007, 0.0008, fBody);
             break;
+        }
 
         case Kind::crash:
         case Kind::splash:
@@ -681,6 +728,27 @@ void AcousticDrum::renderChunk (float* out, int n) noexcept
         }
         float y = yl + swell * yh;
 
+        // --- hi-hat plates
+        if (hat && (hatFast > 1.0e-7f || hatSlow > 1.0e-7f || hatSz > 1.0e-7f))
+        {
+            const float n = noise();
+            float b = 0.0f;
+            for (int i = 0; i < hatBands; ++i)
+                b += hatBand[(size_t) i].process (n) * hatGain[(size_t) i];
+            float slow = hatSlow;
+            if (wobbleDepth > 0.0f)
+            {
+                wobblePhase += wobbleInc;
+                if (wobblePhase > 6.2831853f) wobblePhase -= 6.2831853f;
+                slow *= 1.0f + wobbleDepth * std::sin (wobblePhase);
+            }
+            const float sz = hatHp2.process (hatHp1.process (noise()));
+            y += (hatFast + slow) * b * hatNorm * 0.35f + hatSz * sz * szNorm * 0.35f;
+            hatFast *= hatFastK;
+            hatSlow *= hatSlowK;
+            hatSz   *= hatSzK;
+        }
+
         // --- noise: stick tick, sizzle, brush, claps
         float in[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
         for (int i = 0; i < numBursts;)
@@ -727,6 +795,7 @@ void AcousticDrum::renderChunk (float* out, int n) noexcept
     // --- has it died away?
     if (chokeGain < 1.0e-4f
         || (numPulses == 0 && numBursts == 0 && now - lastHit > 0.03 * sr && chunkPeak < 1.5e-5f && wireEnv < 1.0e-4f
+            && hatSlow < 1.0e-5f && hatSz < 1.0e-5f
             && ++quietChunks >= 3))
         active = false;
     else if (chunkPeak >= 1.5e-5f)

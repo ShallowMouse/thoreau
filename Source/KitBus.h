@@ -83,6 +83,11 @@ private:
     juce::dsp::Convolution convolution { juce::dsp::Convolution::NonUniform { 512 } };
     juce::AudioBuffer<float> ohBuf, roomBuf, sendBuf, fxBuf, dryBuf;
     std::vector<float> ohDelay[2], echo[2];
+    // overheads: a little diffusion (allpasses) so they don't line up sample-perfect with the close
+    // mics - real overheads hear each drum through reflections, so there's no regular comb filter
+    struct Allpass { std::vector<float> buf; int pos = 0, len = 1; float g = 0.55f;
+                     inline float process (float x) noexcept { const float d = buf[(size_t) pos]; const float v = x + g * d; buf[(size_t) pos] = v; pos = (pos + 1) % len; return d - g * v; } };
+    std::array<std::array<Allpass, 3>, 2> ohDiffuse;
     int ohWrite = 0, ohDelaySamples = 1, echoWrite = 0, echoLen = 1;
 
     std::array<Biquad, 2> ohHp, roomHp, lowShelf, highShelf, lowCut, highCut, echoLp;

@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "Melville.h"
 #include "SettingsPanel.h"
 
 namespace thoreau
@@ -275,7 +276,7 @@ MainComponent::~MainComponent()
     stopTimer();
     saveProject();
     auto* s = props.getUserSettings();
-    if (auto state = deviceManager.createStateXml())
+    if (auto state = melville::isHosted() ? nullptr : deviceManager.createStateXml())
         s->setValue ("audio", state.get());
     props.saveIfNeeded();
     deviceManager.removeMidiInputDeviceCallback ({}, &engine);
@@ -289,7 +290,9 @@ MainComponent::~MainComponent()
 void MainComponent::initialiseAudio()
 {
     auto saved = props.getUserSettings()->getXmlValue ("audio");
-    const auto err = deviceManager.initialise (0, 2, saved.get(), true);
+    // inside MELVILLE: MELVILLE's THOREAU device (patched onto Hawthorne's MELVILLE buses)
+    const auto err = melville::attach (deviceManager, "thoreau") ? juce::String()
+                                                                 : deviceManager.initialise (0, 2, saved.get(), true);
     if (err.isNotEmpty()) message ("!! audio: " + err);
     deviceManager.addAudioCallback (&engine);
     // every enabled MIDI input plays the drums

@@ -1,4 +1,5 @@
 #include "SettingsPanel.h"
+#include "Melville.h"
 
 namespace thoreau
 {
@@ -8,8 +9,10 @@ using namespace Pequod;
 SettingsPanel::SettingsPanel (juce::AudioDeviceManager& dm, DrumEngine& engine, bool followReel, Callbacks c)
     : callbacks (std::move (c))
 {
-    auto* audio = new juce::AudioDeviceSelectorComponent (dm, 0, 0, 2, 2, true, false, true, false);
-    tabs.addTab ("AUDIO", Pequod::Colours::panel, audio, true);
+    if (auto midi = melville::midiInputsPanel (dm))     // inside MELVILLE: no audio device here, just MIDI
+        tabs.addTab ("MIDI", Pequod::Colours::panel, midi.release(), true);
+    else
+        tabs.addTab ("AUDIO", Pequod::Colours::panel, new juce::AudioDeviceSelectorComponent (dm, 0, 0, 2, 2, true, false, true, false), true);
     tabs.addTab ("HAWTHORNE", Pequod::Colours::panel, new LinkPage (engine, followReel, callbacks), true);
     tabs.setTabBarDepth (34);
     tabs.setOutline (0);

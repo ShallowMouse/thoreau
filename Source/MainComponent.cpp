@@ -134,7 +134,7 @@ MainComponent::MainComponent()
         project.beatsPerBar = bpbBox.getSelectedId();
         hawthorne::NetSender::TapeClock c;
         if (engine.getClockSource() == ClockSource::hawthorne && freshClock (c) && c.bpm > 0.0)
-            engine.netOut.sendTempo (c.bpm, bpbBox.getSelectedId(), c.barOne);
+            sendTempo (c.bpm, bpbBox.getSelectedId(), c.barOne);
         projectEdited();
     };
     addAndMakeVisible (bpbBox);
@@ -254,10 +254,10 @@ MainComponent::MainComponent()
     else { projectFile = projectsFolder().getChildFile ("Untitled.thoreau"); afterProjectLoad(); }
 
     initialiseAudio();
-    if (s->getBoolValue ("link", true))
+    if (s->getBoolValue ("link", true) && ! melville::isHosted())   // inside MELVILLE the patchbay carries the outs
         setLink (true, engine.netOut.getName());
 
-    setClock (s->getValue ("clock", "internal") == "hawthorne" ? ClockSource::hawthorne : ClockSource::internal);
+    setClock (s->getValue ("clock", melville::isHosted() ? "hawthorne" : "internal") == "hawthorne" ? ClockSource::hawthorne : ClockSource::internal);
     setMode (PlayMode::pattern);
     selectPattern (0);
 
@@ -273,6 +273,9 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+   #if defined (MELVILLE_HOSTED) && MELVILLE_HOSTED
+    melville::detach (deviceManager);     // (and out of MELVILLE's session)
+   #endif
     stopTimer();
     saveProject();
     auto* s = props.getUserSettings();
@@ -293,6 +296,19 @@ void MainComponent::initialiseAudio()
     // inside MELVILLE: MELVILLE's THOREAU device (patched onto Hawthorne's MELVILLE buses)
     const auto err = melville::attach (deviceManager, "thoreau") ? juce::String()
                                                                  : deviceManager.initialise (0, 2, saved.get(), true);
+   #if defined (MELVILLE_HOSTED) && MELVILLE_HOSTED
+    // MELVILLE's session file keeps which THOREAU project is open (saved with it)
+    melville::addToSession (deviceManager, {
+        [this] { saveProject();
+                 auto x = std::make_unique<juce::XmlElement> ("THOREAU");
+                 x->setAttribute ("project", projectFile.getFullPathName());
+                 return x; },
+        [this] (const juce::XmlElement& x)
+        {
+            const juce::File f (x.getStringAttribute ("project"));
+            if (f.existsAsFile() && f != projectFile) { saveProject(); loadProject (f); }
+        } });
+   #endif
     if (err.isNotEmpty()) message ("!! audio: " + err);
     deviceManager.addAudioCallback (&engine);
     // every enabled MIDI input plays the drums
@@ -498,9 +514,23 @@ void MainComponent::setMode (PlayMode m)
 
 bool MainComponent::freshClock (hawthorne::NetSender::TapeClock& c) const
 {
+    if (melville::isHosted())
+        return engine.getHostedClock (c, melville::currentFrame());
     return engine.isNetworkEnabled() && engine.netOut.getTapeClock (c)
         && juce::Time::getMillisecondCounter() - c.receivedMs < TapeChase::staleMs
         && c.session == engine.netOut.getSession();
+}
+
+void MainComponent::sendTempo (double bpm, int bpb, double barOne)
+{
+   #if defined (MELVILLE_HOSTED) && MELVILLE_HOSTED
+    if (melville::isHosted())
+    {
+        if (auto& f = melville::transport().setTempo) f (bpm, bpb, barOne);   // the reel's tempo map (Hawthorne keeps it)
+        return;
+    }
+   #endif
+    engine.netOut.sendTempo (bpm, bpb, barOne);
 }
 
 void MainComponent::setTempo (double bpm)
@@ -522,12 +552,12 @@ void MainComponent::setBarOne (double tapePos)
     hawthorne::NetSender::TapeClock c;
     if (! freshClock (c) || (c.flags & 4) == 0)
     {
-        message ("!! not synced to Hawthorne - connect THOREAU in Hawthorne's NETWORK window");
+        message (melville::isHosted() ? "!! no reel loaded in Hawthorne" : "!! not synced to Hawthorne - connect THOREAU in Hawthorne's NETWORK window");
         return;
     }
     const double bpm = c.bpm > 0 ? c.bpm : project.bpm.load();
     const int bpb = c.bpm > 0 ? c.beatsPerBar : project.beatsPerBar.load();
-    engine.netOut.sendTempo (bpm, bpb, std::round (juce::jmax (0.0, tapePos)));
+    sendTempo (bpm, bpb, std::round (juce::jmax (0.0, tapePos)));
     message ("bar 1 at " + formatTape (tapePos) + " on the tape");
 }
 
@@ -540,7 +570,7 @@ void MainComponent::handleTapeTempo()
 
     if (pendingTempo > 0.0 && now - lastTempoSendMs > 60.0)
     {
-        engine.netOut.sendTempo (pendingTempo, c.bpm > 0 ? c.beatsPerBar : project.beatsPerBar.load(), c.bpm > 0 ? c.barOne : 0.0);
+        sendTempo (pendingTempo, c.bpm > 0 ? c.beatsPerBar : project.beatsPerBar.load(), c.bpm > 0 ? c.barOne : 0.0);
         lastTempoSendMs = now;
         if (std::abs (c.bpm - pendingTempo) < 1e-6) pendingTempo = 0.0;      // the reel has it
         return;
@@ -552,7 +582,7 @@ void MainComponent::handleTapeTempo()
         if (now - lastStripeMs > 1000.0)
         {
             lastStripeMs = now;
-            engine.netOut.sendTempo (project.bpm.load(), project.beatsPerBar.load(), 0.0);
+            sendTempo (project.bpm.load(), project.beatsPerBar.load(), 0.0);
             message ("putting " + juce::String (project.bpm.load(), 1) + " BPM on reel \"" + engine.netOut.getReelName() + "\"");
         }
         return;

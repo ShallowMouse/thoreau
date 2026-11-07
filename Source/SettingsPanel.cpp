@@ -13,7 +13,8 @@ SettingsPanel::SettingsPanel (juce::AudioDeviceManager& dm, DrumEngine& engine, 
         tabs.addTab ("MIDI", Pequod::Colours::panel, midi.release(), true);
     else
         tabs.addTab ("AUDIO", Pequod::Colours::panel, new juce::AudioDeviceSelectorComponent (dm, 0, 0, 2, 2, true, false, true, false), true);
-    tabs.addTab ("HAWTHORNE", Pequod::Colours::panel, new LinkPage (engine, followReel, callbacks), true);
+    if (! melville::isHosted())        // inside MELVILLE: no link (the patchbay has the outs) and the transport is MELVILLE's
+        tabs.addTab ("HAWTHORNE", Pequod::Colours::panel, new LinkPage (engine, followReel, callbacks), true);
     tabs.setTabBarDepth (34);
     tabs.setOutline (0);
     addAndMakeVisible (tabs);

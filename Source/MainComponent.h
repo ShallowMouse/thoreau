@@ -69,6 +69,7 @@ private:
     void setBarOne (double tapePos);
     void handleTapeTempo();
     bool freshClock (hawthorne::NetSender::TapeClock&) const;
+    void sendTempo (double bpm, int beatsPerBar, double barOne);
 
     // pattern
     void selectPattern (int p);

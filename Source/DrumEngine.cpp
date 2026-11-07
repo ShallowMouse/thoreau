@@ -1,4 +1,5 @@
 #include "DrumEngine.h"
+#include "Melville.h"
 
 namespace thoreau
 {
@@ -299,7 +300,9 @@ void DrumEngine::recordHit (int track, float velocity, double beat) noexcept
 void DrumEngine::renderChunk (float* const* outputs, int numOutputs, int start, int n) noexcept
 {
     const double sr = sampleRate.load (std::memory_order_relaxed);
-    const juce::uint64 frame0 = netOut.getNextFrame();
+    // our frame number for this block: inside MELVILLE its frame clock (shared by every part),
+    // on our own the Hawthorne Link stream's
+    const juce::uint64 frame0 = melville::isHosted() ? (juce::uint64) (melville::currentFrame() + start) : netOut.getNextFrame();
 
     //--------------------------------------------------------------------------
     // Where we are in the music for this block
@@ -339,7 +342,11 @@ void DrumEngine::renderChunk (float* const* outputs, int numOutputs, int start, 
     else
     {
         hawthorne::NetSender::TapeClock c;
-        const bool have = networkOn.load() && netOut.getTapeClock (c);
+        bool have = false;
+        if (melville::isHosted())
+            have = getHostedClock (c, (juce::int64) frame0);   // inside MELVILLE: its transport, no network
+        else
+        have = networkOn.load() && netOut.getTapeClock (c);
         const auto span = chase.advance (c, have, netOut.getSession(), frame0, n, sr, tempo, juce::Time::getMillisecondCounter());
         rolling = span.rolling;
         beat0 = span.beat0; beat1 = span.beat1; scanFrom = span.scanFrom;
@@ -459,10 +466,22 @@ void DrumEngine::renderChunk (float* const* outputs, int numOutputs, int start, 
 
     //--------------------------------------------------------------------------
     // Out: this PC's outputs, and Hawthorne Link
-    if (localOut.load (std::memory_order_relaxed))
+    if (localOut.load (std::memory_order_relaxed) || melville::isHosted())
         for (int ch = 0; ch < juce::jmin (2, numOutputs); ++ch)
             if (outputs[ch] != nullptr)
                 juce::FloatVectorOperations::copy (outputs[ch] + start, mixBuf.getReadPointer (ch), n);
+
+    // inside MELVILLE the kit's separate outs are jacks on its patch panel: each voice after
+    // its level, then the overheads and room
+    if (melville::isHosted() && numOutputs >= 2 + kTracks + 4)
+    {
+        auto put = [&] (int o, const float* src) { if (outputs[o] != nullptr && src != nullptr) juce::FloatVectorOperations::copy (outputs[o] + start, src, n); };
+        for (int t = 0; t < kTracks; ++t) put (2 + t, trackBuf.getReadPointer (t));
+        put (2 + kTracks,     bus.overheadStem (0));
+        put (2 + kTracks + 1, bus.overheadStem (1));
+        put (2 + kTracks + 2, bus.roomStem (0));
+        put (2 + kTracks + 3, bus.roomStem (1));
+    }
 
     const int nc = netChannels.load (std::memory_order_relaxed);
     if (networkOn.load (std::memory_order_relaxed) && (int) netPtrs.size() >= nc)
@@ -508,6 +527,30 @@ void DrumEngine::renderChunk (float* const* outputs, int numOutputs, int start, 
     uiPattern.store (pat, std::memory_order_relaxed);
     uiStep.store (step, std::memory_order_relaxed);
     uiEntry.store (entry, std::memory_order_relaxed);
+}
+
+bool DrumEngine::getHostedClock (hawthorne::NetSender::TapeClock& c, juce::int64 frame) const
+{
+   #if defined (MELVILLE_HOSTED) && MELVILLE_HOSTED
+    double pos = 0.0, rate = 0.0; int fl = 0;
+    if (! melville::tapePositionAt (frame, pos, rate, fl)) return false;
+    auto& t = melville::transport();
+    c.session = netOut.getSession();
+    c.senderFrame = (double) frame;
+    c.tapePos = pos;
+    c.tapePerFrame = rate;
+    c.flags = fl;
+    c.bpm = t.bpm.load();
+    c.beatsPerBar = t.beatsPerBar.load();
+    c.barOne = t.barOne.load();
+    c.tempoRev = t.tempoRev.load();
+    c.receivedMs = juce::Time::getMillisecondCounter();
+    c.count = ++hostedClockCount;
+    return true;
+   #else
+    juce::ignoreUnused (c, frame);
+    return false;
+   #endif
 }
 
 } // namespace thoreau

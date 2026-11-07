@@ -90,6 +90,9 @@ class DrumEngine : public juce::AudioIODeviceCallback,
                    public juce::MidiInputCallback
 {
 public:
+    /** Inside MELVILLE: the tape clock from MELVILLE's transport at that frame (false when nothing is published). */
+    bool getHostedClock (hawthorne::NetSender::TapeClock&, juce::int64 frame) const;
+
     explicit DrumEngine (Project&);
     ~DrumEngine() override;
 
@@ -197,6 +200,7 @@ private:
     std::atomic<bool> playRequested { false }, stopRequested { false };
     std::atomic<int> currentPattern { 0 }, queuedPattern { -1 };
     std::atomic<bool> liveRecord { false }, networkOn { false }, individualOuts { false }, localOut { true };
+    mutable std::atomic<juce::uint64> hostedClockCount { 0 };            // (inside MELVILLE: MELVILLE's transport, not the network)
     std::atomic<int> netChannels { 2 };
 
     // audio thread state

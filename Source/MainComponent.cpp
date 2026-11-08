@@ -475,6 +475,8 @@ void MainComponent::showFileMenu()
         selectPattern (0);
         message ("starter beat for " + kitAt (project.kit).name + " in A, fill in B");
     });
+    if (! melville::isHosted())      // (inside MELVILLE the drums are kept with the reel: its LIBRARY)
+    {
     m.addItem ("Open...", [this]
     {
         chooser = std::make_unique<juce::FileChooser> ("Open a THOREAU project", projectsFolder(), "*.thoreau");
@@ -498,6 +500,7 @@ void MainComponent::showFileMenu()
     });
     m.addSeparator();
     m.addItem ("Show projects folder", [this] { projectsFolder().createDirectory(); projectsFolder().startAsProcess(); });
+    }
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&fileButton));
 }
 
@@ -593,7 +596,7 @@ void MainComponent::setBarOne (double tapePos)
     hawthorne::NetSender::TapeClock c;
     if (! freshClock (c) || (c.flags & 4) == 0)
     {
-        message (melville::isHosted() ? "!! no reel loaded in Hawthorne" : "!! not synced to Hawthorne - connect THOREAU in Hawthorne's NETWORK window");
+        message (melville::isHosted() ? "!! MELVILLE's clock isn't running" : "!! not synced to Hawthorne - connect THOREAU in Hawthorne's NETWORK window");
         return;
     }
     const double bpm = c.bpm > 0 ? c.bpm : project.bpm.load();

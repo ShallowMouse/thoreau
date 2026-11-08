@@ -324,13 +324,27 @@ void MainComponent::initialiseAudio()
    #if defined (MELVILLE_HOSTED) && MELVILLE_HOSTED
     // MELVILLE's session file keeps which THOREAU project is open (saved with it)
     melville::addToSession (deviceManager, {
-        [this] { saveProject();
-                 auto x = std::make_unique<juce::XmlElement> ("THOREAU");
-                 x->setAttribute ("project", projectFile.getFullPathName());
-                 return x; },
+        [this]
+        {
+            // with a reel on the deck the drums live in its folder, so the song keeps them
+            const auto folder = melville::studioFolder();
+            if (folder != juce::File())
+            {
+                const auto own = folder.getChildFile ("THOREAU.thoreau");
+                if (projectFile != own) { projectFile = own; props.getUserSettings()->setValue ("lastProject", own.getFullPathName()); }
+            }
+            saveProject();
+            auto x = std::make_unique<juce::XmlElement> ("THOREAU");
+            x->setAttribute ("project", folder != juce::File() && projectFile.isAChildOf (folder)
+                                            ? projectFile.getRelativePathFrom (folder) : projectFile.getFullPathName());
+            return x;
+        },
         [this] (const juce::XmlElement& x)
         {
-            const juce::File f (x.getStringAttribute ("project"));
+            const auto path = x.getStringAttribute ("project");
+            const auto folder = melville::studioFolder();
+            const juce::File f = juce::File::isAbsolutePath (path) ? juce::File (path)
+                               : folder != juce::File() ? folder.getChildFile (path) : juce::File();
             if (f.existsAsFile() && f != projectFile) { saveProject(); loadProject (f); }
         } });
    #endif

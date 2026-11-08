@@ -107,14 +107,14 @@ MainComponent::MainComponent()
     playButton.onClick = [this]
     {
        #if defined (MELVILLE_HOSTED) && MELVILLE_HOSTED
-        if (melville::isHosted()) { if (auto& f = melville::transport().play) f(); return; }
+        if (melville::isHosted()) { melville::play(); return; }
        #endif
         engine.play();
     };
     stopButton.onClick = [this]
     {
        #if defined (MELVILLE_HOSTED) && MELVILLE_HOSTED
-        if (melville::isHosted()) { if (auto& f = melville::transport().stop) f(); return; }
+        if (melville::isHosted()) { melville::stop(); return; }
        #endif
         engine.stop();
     };
@@ -551,7 +551,7 @@ void MainComponent::sendTempo (double bpm, int bpb, double barOne)
    #if defined (MELVILLE_HOSTED) && MELVILLE_HOSTED
     if (melville::isHosted())
     {
-        if (auto& f = melville::transport().setTempo) f (bpm, bpb, barOne);   // the reel's tempo map (Hawthorne keeps it)
+        melville::setTempo (bpm, bpb, barOne);   // (MELVILLE's tempo; the reel keeps it too)
         return;
     }
    #endif
@@ -735,8 +735,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
    #if defined (MELVILLE_HOSTED) && MELVILLE_HOSTED
     if (k == juce::KeyPress::spaceKey && melville::isHosted())
     {
-        auto& t = melville::transport();
-        if (auto& f = t.rolling.load() ? t.stop : t.play) f();
+        if (melville::isRolling()) melville::stop(); else melville::play();
         return true;
     }
    #endif

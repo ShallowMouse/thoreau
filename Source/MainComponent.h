@@ -1,6 +1,8 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "PartHeader.h"
+#include "Melville.h"
 #include "ThoreauLookAndFeel.h"
 #include "DrumEngine.h"
 #include "StepGrid.h"
@@ -90,7 +92,11 @@ private:
     juce::TextButton clockInternal { "INTERNAL" }, clockTape { "HAWTHORNE" },
                      playButton { "PLAY" }, stopButton { "STOP" }, recButton { "REC" }, tapButton { "TAP" },
                      modePattern { "PATTERN" }, modeSong { "SONG" },
-                     fileButton { "FILE" }, settingsButton { "SETTINGS" }, updateButton { "UPDATE" };
+                     updateButton { "UPDATE" };
+    partui::Key fileButton { "File: new project, starter beat, open, save as", partui::Icon::folder },
+                settingsButton { "Settings", partui::Icon::settings };
+    /** This part's colour: its own inside MELVILLE (the same moss green). */
+    juce::Colour partColour() const { return melville::isHosted() ? partui::accent ("thoreau") : Pequod::Colours::mustard; }
     BpmDisplay bpmDisplay;
     juce::ComboBox bpbBox;
     juce::Slider swingKnob { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox },

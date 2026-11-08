@@ -177,6 +177,7 @@ MainComponent::MainComponent()
     modeSong.onClick    = [this] { if (modeSong.getToggleState()) setMode (PlayMode::song); };
 
     fileButton.onClick = [this] { showFileMenu(); };
+    for (auto* k : { &fileButton, &settingsButton }) k->setPartColour (partColour());
     settingsButton.onClick = [this] { showSettings(); };
     updateButton.setColour (juce::TextButton::buttonColourId, Pequod::Colours::mustard);
     updateButton.setColour (juce::TextButton::textColourOffId, Pequod::Colours::bg);
@@ -774,9 +775,8 @@ void MainComponent::resized()
     statusArea = r.removeFromBottom (26);
 
     auto h = headerArea.reduced (16, 12);
-    settingsButton.setBounds (h.removeFromRight (100).reduced (2, 6));
-    fileButton.setBounds (h.removeFromRight (64).reduced (2, 6));
-    if (updateButton.isVisible()) updateButton.setBounds (h.removeFromRight (160).reduced (2, 6));
+    h = partui::placeKeys (h, { &settingsButton, &fileButton });      // (the keys every part has, right)
+    if (updateButton.isVisible()) updateButton.setBounds (h.removeFromRight (160).withSizeKeepingCentre (160, partui::keyHeight));
     h.removeFromRight (6);
     logoArea = h.removeFromLeft (h.getWidth() > 1300 ? 210 : 150);
     auto clock = h.removeFromLeft (melville::isHosted() ? 0 : 212);   // (inside MELVILLE there's no clock choice)
@@ -848,20 +848,9 @@ void MainComponent::paint (juce::Graphics& g)
 {
     g.fillAll (Pequod::Colours::bg);
 
-    // header
-    g.setColour (Pequod::Colours::panel);
-    g.fillRect (headerArea);
-    g.setColour (Pequod::Colours::mustard);
-    g.fillRect (headerArea.withTop (headerArea.getBottom() - 2));
-    {
-        auto l = logoArea;
-        g.setFont (heading (30.0f));
-        g.setColour (Pequod::Colours::mustard);
-        g.drawText ("THOREAU", l.removeFromTop (34), juce::Justification::bottomLeft);
-        g.setFont (heading (11.0f, false));
-        g.setColour (Pequod::Colours::textDim);
-        g.drawText ("DRUM MACHINE", l, juce::Justification::topLeft);
-    }
+    // header: the bar every part has (THOREAU's is taller: its transport lives in it)
+    partui::drawBar (g, headerArea, partColour());
+    partui::drawWordmark (g, logoArea, "THOREAU", "DRUM MACHINE", partColour(), heading (30.0f));
 
     // counter
     {

@@ -182,6 +182,7 @@ private:
     };
     void trigger (int track, float velocity, double onset) noexcept;
     void renderChunk (float* const* outputs, int numOutputs, int start, int n) noexcept;
+    int chunkStart = 0;          // (audio thread: where the chunk being rendered starts in the block)
     void scheduleSpan (double scanFrom, double beat0, double beat1, int n, bool catchUp) noexcept;
     void scheduleHit (const Sequencer::Hit&, double beat0, double beat1, int n) noexcept;
     void recordHit (int track, float velocity, double beat) noexcept;

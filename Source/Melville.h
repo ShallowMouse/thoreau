@@ -14,6 +14,7 @@ namespace melville
 {
     inline bool isHosted() noexcept { return false; }
     inline juce::int64 currentFrame() noexcept { return 0; }
+    inline void postNote (int, int, float, int) noexcept {}
     inline bool attach (juce::AudioDeviceManager&, const char*) { return false; }
     inline std::unique_ptr<juce::Component> midiInputsPanel (juce::AudioDeviceManager&) { return {}; }
 }

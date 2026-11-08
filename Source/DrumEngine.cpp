@@ -228,6 +228,10 @@ void DrumEngine::scheduleHit (const Sequencer::Hit& h, double beat0, double beat
     const double span = beat1 - beat0;
     const double onset = span > 0.0 ? (h.beat - beat0) / span * n : 0.0;
     trigger (h.track, h.velocity, onset);
+    // inside MELVILLE the step plays ALCOTT's instruments too: pad k on channel k, with its MIDI note
+    if (melville::isHosted())
+        melville::postNote (h.track + 1, project.tracks[(size_t) h.track].midiNote.load (std::memory_order_relaxed),
+                            h.velocity, chunkStart + juce::jmax (0, (int) onset));
 }
 
 void DrumEngine::scheduleSpan (double scanFrom, double beat0, double beat1, int n, bool catchUp) noexcept
@@ -299,6 +303,7 @@ void DrumEngine::recordHit (int track, float velocity, double beat) noexcept
 
 void DrumEngine::renderChunk (float* const* outputs, int numOutputs, int start, int n) noexcept
 {
+    chunkStart = start;
     const double sr = sampleRate.load (std::memory_order_relaxed);
     // our frame number for this block: inside MELVILLE its frame clock (shared by every part),
     // on our own the Hawthorne Link stream's

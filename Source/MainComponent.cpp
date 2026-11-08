@@ -104,8 +104,20 @@ MainComponent::MainComponent()
     clockInternal.onClick = [this] { if (clockInternal.getToggleState()) setClock (ClockSource::internal); };
     clockTape.onClick     = [this] { if (clockTape.getToggleState()) setClock (ClockSource::hawthorne); };
 
-    playButton.onClick = [this] { engine.play(); };
-    stopButton.onClick = [this] { engine.stop(); };
+    playButton.onClick = [this]
+    {
+       #if defined (MELVILLE_HOSTED) && MELVILLE_HOSTED
+        if (melville::isHosted()) { if (auto& f = melville::transport().play) f(); return; }
+       #endif
+        engine.play();
+    };
+    stopButton.onClick = [this]
+    {
+       #if defined (MELVILLE_HOSTED) && MELVILLE_HOSTED
+        if (melville::isHosted()) { if (auto& f = melville::transport().stop) f(); return; }
+       #endif
+        engine.stop();
+    };
     recButton.setClickingTogglesState (true);
     recButton.setTooltip ("Live record: pads and MIDI drums you play while it runs go into the pattern");
     recButton.onClick = [this] { engine.setRecording (recButton.getToggleState()); };
@@ -133,7 +145,7 @@ MainComponent::MainComponent()
     {
         project.beatsPerBar = bpbBox.getSelectedId();
         hawthorne::NetSender::TapeClock c;
-        if (engine.getClockSource() == ClockSource::hawthorne && freshClock (c) && c.bpm > 0.0)
+        if (engine.getClockSource() == ClockSource::hawthorne && freshClock (c) && c.bpm > 0.0 && ! melville::isHosted())
             sendTempo (c.bpm, bpbBox.getSelectedId(), c.barOne);
         projectEdited();
     };
@@ -257,7 +269,20 @@ MainComponent::MainComponent()
     if (s->getBoolValue ("link", true) && ! melville::isHosted())   // inside MELVILLE the patchbay carries the outs
         setLink (true, engine.netOut.getName());
 
-    setClock (s->getValue ("clock", melville::isHosted() ? "hawthorne" : "internal") == "hawthorne" ? ClockSource::hawthorne : ClockSource::internal);
+    setClock (melville::isHosted() ? ClockSource::hawthorne      // inside MELVILLE: always its slave
+                                   : s->getValue ("clock", "internal") == "hawthorne" ? ClockSource::hawthorne : ClockSource::internal);
+    if (melville::isHosted())
+    {
+        // MELVILLE owns the tempo, the meter and bar 1 (on its bar); THOREAU shows them and follows
+        for (auto* c : std::initializer_list<juce::Component*> { &clockInternal, &clockTape, &tapButton, &barOneButton, &nudgeEarly, &nudgeLate })
+            c->setVisible (false);
+        bpmDisplay.setInterceptsMouseClicks (false, false);
+        bpmDisplay.setTooltip ("MELVILLE's tempo: set it on MELVILLE's bar");
+        bpbBox.setEnabled (false);
+        bpbBox.setTooltip ("MELVILLE's beats per bar: right-click the counter on MELVILLE's bar");
+        playButton.setTooltip ("Play MELVILLE's transport");
+        stopButton.setTooltip ("Stop MELVILLE's transport");
+    }
     setMode (PlayMode::pattern);
     selectPattern (0);
 
@@ -493,14 +518,14 @@ void MainComponent::setClock (ClockSource c)
     engine.setClockSource (c);
     clockInternal.setToggleState (c == ClockSource::internal, juce::dontSendNotification);
     clockTape.setToggleState (c == ClockSource::hawthorne, juce::dontSendNotification);
-    playButton.setEnabled (c == ClockSource::internal);
-    stopButton.setEnabled (c == ClockSource::internal);
-    for (auto* b : { &barOneButton, &nudgeEarly, &nudgeLate }) b->setVisible (c == ClockSource::hawthorne);
+    playButton.setEnabled (c == ClockSource::internal || melville::isHosted());
+    stopButton.setEnabled (c == ClockSource::internal || melville::isHosted());
+    for (auto* b : { &barOneButton, &nudgeEarly, &nudgeLate }) b->setVisible (c == ClockSource::hawthorne && ! melville::isHosted());
     props.getUserSettings()->setValue ("clock", c == ClockSource::hawthorne ? "hawthorne" : "internal");
     if (c == ClockSource::hawthorne && ! engine.isNetworkEnabled())
         setLink (true, engine.netOut.getName());
     currentReel.clear();
-    message (c == ClockSource::hawthorne ? "following Hawthorne's tape" : "on THOREAU's own clock");
+    message (melville::isHosted() ? "following MELVILLE's transport" : c == ClockSource::hawthorne ? "following Hawthorne's tape" : "on THOREAU's own clock");
     repaint();
 }
 
@@ -535,6 +560,7 @@ void MainComponent::sendTempo (double bpm, int bpb, double barOne)
 
 void MainComponent::setTempo (double bpm)
 {
+    if (melville::isHosted()) return;       // MELVILLE's tempo, set on its bar
     bpm = juce::jlimit (30.0, 300.0, bpm);
     hawthorne::NetSender::TapeClock c;
     if (engine.getClockSource() == ClockSource::hawthorne && freshClock (c) && (c.flags & 4) != 0)
@@ -549,6 +575,7 @@ void MainComponent::setTempo (double bpm)
 
 void MainComponent::setBarOne (double tapePos)
 {
+    if (melville::isHosted()) return;
     hawthorne::NetSender::TapeClock c;
     if (! freshClock (c) || (c.flags & 4) == 0)
     {
@@ -578,6 +605,7 @@ void MainComponent::handleTapeTempo()
 
     if (c.bpm <= 0.0)
     {
+        if (melville::isHosted()) return;   // MELVILLE sets the tempo, not THOREAU
         // a reel with no tempo yet: put ours on it (bar 1 at the start of the tape)
         if (now - lastStripeMs > 1000.0)
         {
@@ -694,7 +722,7 @@ void MainComponent::timerCallback()
     bpmDisplay.setValue (engine.getClockSource() == ClockSource::hawthorne && engine.isReelTempo() && pendingTempo == 0.0
                              ? engine.getBpm() : project.bpm.load(),
                          engine.isReelTempo());
-    playButton.setToggleState (engine.isRolling() && engine.getClockSource() == ClockSource::internal, juce::dontSendNotification);
+    playButton.setToggleState (engine.isRolling() && (engine.getClockSource() == ClockSource::internal || melville::isHosted()), juce::dontSendNotification);
 
     static int frame = 0;
     if (++frame % 6 == 0) refreshPatternBar();
@@ -704,6 +732,14 @@ void MainComponent::timerCallback()
 
 bool MainComponent::keyPressed (const juce::KeyPress& k)
 {
+   #if defined (MELVILLE_HOSTED) && MELVILLE_HOSTED
+    if (k == juce::KeyPress::spaceKey && melville::isHosted())
+    {
+        auto& t = melville::transport();
+        if (auto& f = t.rolling.load() ? t.stop : t.play) f();
+        return true;
+    }
+   #endif
     if (k == juce::KeyPress::spaceKey && engine.getClockSource() == ClockSource::internal)
     {
         if (engine.isRolling()) engine.stop(); else engine.play();
@@ -727,7 +763,7 @@ void MainComponent::resized()
     if (updateButton.isVisible()) updateButton.setBounds (h.removeFromRight (160).reduced (2, 6));
     h.removeFromRight (6);
     logoArea = h.removeFromLeft (h.getWidth() > 1300 ? 210 : 150);
-    auto clock = h.removeFromLeft (212);
+    auto clock = h.removeFromLeft (melville::isHosted() ? 0 : 212);   // (inside MELVILLE there's no clock choice)
     clockInternal.setBounds (clock.removeFromLeft (100).reduced (2, 6));
     clockTape.setBounds (clock.removeFromLeft (112).reduced (2, 6));
     h.removeFromLeft (8);
@@ -740,8 +776,8 @@ void MainComponent::resized()
     bpmDisplay.setBounds (h.removeFromLeft (130).reduced (0, 2));
     h.removeFromLeft (4);
     auto tempoCol = h.removeFromLeft (70);
-    tapButton.setBounds (tempoCol.removeFromTop (tempoCol.getHeight() / 2).reduced (2, 1));
-    bpbBox.setBounds (tempoCol.reduced (2, 1));
+    if (tapButton.isVisible()) tapButton.setBounds (tempoCol.removeFromTop (tempoCol.getHeight() / 2).reduced (2, 1));
+    bpbBox.setBounds (tapButton.isVisible() ? tempoCol.reduced (2, 1) : tempoCol.withSizeKeepingCentre (tempoCol.getWidth(), 26).reduced (2, 0));
     h.removeFromLeft (8);
     auto sw = h.removeFromLeft (54);
     swingLabelArea = sw.removeFromBottom (14);
@@ -847,12 +883,14 @@ void MainComponent::paint (juce::Graphics& g)
         auto r = syncArea.reduced (24, 12);
         g.setColour (Pequod::Colours::mustard);
         g.setFont (heading (16.0f));
-        g.drawText ("HAWTHORNE", r.removeFromTop (24), juce::Justification::centredLeft);
+        g.drawText (melville::isHosted() ? "MELVILLE" : "HAWTHORNE", r.removeFromTop (24), juce::Justification::centredLeft);
         r.removeFromTop (4);
 
         juce::StringArray lines;
         const auto subs = engine.netOut.getSubscribers();
-        if (! engine.isNetworkEnabled())
+        if (melville::isHosted())
+            lines.add ("> slave to MELVILLE (tempo and transport)");
+        else if (! engine.isNetworkEnabled())
             lines.add ("> link OFF (SETTINGS > HAWTHORNE)");
         else
             lines.add ("> \"" + engine.netOut.getName() + "\"  " + juce::String (engine.getNetworkChannels()) + " ch  -> "
@@ -864,13 +902,14 @@ void MainComponent::paint (juce::Graphics& g)
             lines.add ("> clock INTERNAL - choose HAWTHORNE to follow the tape");
         else if (! fresh)
         {
-            lines.add ("> no tape position from Hawthorne yet");
-            lines.add (subs.empty() ? "> connect THOREAU in Hawthorne's NETWORK window" : "> check both run at the same sample rate");
+            lines.add (melville::isHosted() ? "> no tape: load a reel on Hawthorne" : "> no tape position from Hawthorne yet");
+            if (! melville::isHosted()) lines.add (subs.empty() ? "> connect THOREAU in Hawthorne's NETWORK window" : "> check both run at the same sample rate");
         }
         else
         {
             const auto reel = engine.netOut.getReelName();
-            lines.add ("> reel  " + (reel.isNotEmpty() ? "\"" + reel + "\"" : juce::String ("(none on the deck)")));
+            if (! melville::isHosted())
+                lines.add ("> reel  " + (reel.isNotEmpty() ? "\"" + reel + "\"" : juce::String ("(none on the deck)")));
             lines.add ("> tape  " + formatTape (engine.getTapePosition()) + "  "
                        + ((c.flags & 2) ? "RECORDING" : (c.flags & 1) ? "PLAYING" : "STOPPED")
                        + (std::abs (c.tapePerFrame - 1.0) > 1e-4 && c.tapePerFrame > 0 ? "  x" + juce::String (c.tapePerFrame, 3) : juce::String()));
@@ -878,7 +917,7 @@ void MainComponent::paint (juce::Graphics& g)
                 lines.add ("> tempo " + juce::String (c.bpm, 1) + " BPM " + juce::String (c.beatsPerBar) + "/4 on the reel, bar 1 at "
                            + formatTape (c.barOne));
             else
-                lines.add ("> reel has no tempo yet - putting ours on it");
+                lines.add (melville::isHosted() ? "> no tempo yet - set one on MELVILLE's bar" : "> reel has no tempo yet - putting ours on it");
             if (followReelOn && reel.isNotEmpty())
                 lines.add ("> project: " + projectFile.getFileNameWithoutExtension());
         }

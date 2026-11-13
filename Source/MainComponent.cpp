@@ -347,6 +347,18 @@ void MainComponent::initialiseAudio()
             const juce::File f = juce::File::isAbsolutePath (path) ? juce::File (path)
                                : folder != juce::File() ? folder.getChildFile (path) : juce::File();
             if (f.existsAsFile() && f != projectFile) { saveProject(); loadProject (f); }
+        },
+        [this] (const melville::NewStudio& made)
+        {
+            // a new reel: a new song in its folder (the starter kit, no patterns of the last one)
+            saveProject();
+            project.resetToDefault();
+            project.beatsPerBar = juce::jlimit (2, 12, made.beatsPerBar);
+            const auto folder = melville::studioFolder();
+            projectFile = folder != juce::File() ? folder.getChildFile ("THOREAU.thoreau")
+                                                 : projectsFolder().getChildFile ("Untitled.thoreau").getNonexistentSibling();
+            afterProjectLoad();
+            saveProject();
         } });
    #endif
     if (err.isNotEmpty()) message ("!! audio: " + err);

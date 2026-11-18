@@ -10,6 +10,7 @@
 #include "SongPanel.h"
 #include "KitPanel.h"
 #include "Updater.h"
+#include "NearestTooltips.h"
 
 namespace thoreau
 {
@@ -86,7 +87,7 @@ private:
     DrumEngine engine { project };
     juce::AudioDeviceManager deviceManager;
     Updater updater;
-    juce::TooltipWindow tooltips { this, 700 };
+    NearestTooltips tooltips { this, 700 };
 
     // header
     juce::TextButton clockInternal { "INTERNAL" }, clockTape { "HAWTHORNE" },

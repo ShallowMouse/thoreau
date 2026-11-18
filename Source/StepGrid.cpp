@@ -132,11 +132,17 @@ void StepGrid::tick()
 
 void StepGrid::paint (juce::Graphics& g)
 {
+    // The machine's keys: a rubber pad per voice (it lights when it plays), mute and solo keys with
+    // their lamps, and the step keys - each with an LED, their caps coloured by the beat as on the
+    // classic drum machines (red, orange, yellow, cream) so the bar reads at a glance.
     const auto& pt = engine.project.patterns[(size_t) pattern];
     const int len = juce::jmax (1, pt.length.load());
     const int spb = juce::jmax (1, pt.stepsPerBeat.load());
     bool anySolo = false;
     for (auto& tr : engine.project.tracks) anySolo = anySolo || tr.solo.load();
+
+    static const juce::Colour caps[4] = { juce::Colour (0xff6e2e24), juce::Colour (0xff7a4c26), juce::Colour (0xff76692e), juce::Colour (0xff6c6860) };
+    const auto led = Pequod::Colours::mustard.brighter (0.3f);
 
     for (int t = 0; t < kTracks; ++t)
     {
@@ -147,81 +153,87 @@ void StepGrid::paint (juce::Graphics& g)
 
         if (sel)
         {
-            g.setColour (Pequod::Colours::panelHi.withAlpha (0.6f));
-            g.fillRect (row);
+            g.setColour (Pequod::Colours::mustard.withAlpha (0.07f));
+            g.fillRoundedRectangle (row.toFloat(), 3.0f);
         }
 
-        // pad
+        // the pad: soft grey rubber, backlit when it plays
         auto pad = padArea (t).toFloat();
-        g.setColour (Pequod::Colours::well);
-        g.fillRoundedRectangle (pad, 3.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
+        g.fillRoundedRectangle (pad.expanded (1.0f).translated (0.0f, 1.0f), 5.0f);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4a4d4a), pad.getX(), pad.getY(), juce::Colour (0xff2c2e2c), pad.getX(), pad.getBottom(), false));
+        g.fillRoundedRectangle (pad, 4.5f);
         if (hit[(size_t) t] > 0.0f)
         {
-            g.setColour (Pequod::Colours::mustard.withAlpha (0.18f + 0.6f * hit[(size_t) t]));
-            g.fillRoundedRectangle (pad, 3.0f);
+            g.setGradientFill (juce::ColourGradient (Pequod::Colours::mustard.withAlpha (0.25f + 0.55f * hit[(size_t) t]), pad.getCentreX(), pad.getCentreY(),
+                                                     Pequod::Colours::mustard.withAlpha (0.05f), pad.getX(), pad.getY(), true));
+            g.fillRoundedRectangle (pad, 4.5f);
         }
-        g.setColour (sel ? Pequod::Colours::mustard : Pequod::Colours::line);
-        g.drawRoundedRectangle (pad.reduced (0.5f), 3.0f, sel ? 1.5f : 1.0f);
+        g.setColour (sel ? Pequod::Colours::mustard : juce::Colours::white.withAlpha (0.08f));
+        g.drawRoundedRectangle (pad.reduced (0.5f), 4.5f, sel ? 1.5f : 1.0f);
         g.setFont (heading (13.0f));
         g.setColour (silent ? Pequod::Colours::textDim : Pequod::Colours::text);
-        g.drawText (engine.project.padName (t), pad.reduced (8, 0).toNearestInt(), juce::Justification::centredLeft);
+        g.drawText (engine.project.padName (t), pad.reduced (9, 0).toNearestInt(), juce::Justification::centredLeft);
         if (tr.sample.load() != nullptr)
         {
             g.setFont (body (10.0f, true));
             g.setColour (Pequod::Colours::mustard);
-            g.drawText ("SMP", pad.reduced (6, 0).toNearestInt(), juce::Justification::centredRight);
+            g.drawText ("SMP", pad.reduced (7, 0).toNearestInt(), juce::Justification::centredRight);
         }
 
-        // mute / solo
+        // mute / solo: keys with a lamp above the letter
         auto drawToggle = [&] (juce::Rectangle<int> r, const char* label, bool on, juce::Colour onColour)
         {
-            g.setColour (on ? onColour : Pequod::Colours::panelHi);
-            g.fillRoundedRectangle (r.toFloat(), 2.0f);
-            g.setColour (on ? Pequod::Colours::bg : Pequod::Colours::textDim);
-            g.setFont (heading (11.0f));
-            g.drawText (label, r, juce::Justification::centred);
+            auto k = r.toFloat();
+            hw::key (g, k, juce::Colour (0xff3e413e), false, false, onColour);
+            hw::lamp (g, { k.getCentreX(), k.getY() + k.getHeight() * 0.3f }, juce::jmin (3.0f, k.getHeight() * 0.1f), onColour, on);
+            g.setColour (on ? Pequod::Colours::text : Pequod::Colours::textDim);
+            g.setFont (heading (10.0f));
+            g.drawText (label, k.withTrimmedTop (k.getHeight() * 0.48f), juce::Justification::centred);
         };
-        drawToggle (muteArea (t), "M", tr.mute.load(), Pequod::Colours::danger);
-        drawToggle (soloArea (t), "S", tr.solo.load(), Pequod::Colours::mustard);
+        drawToggle (muteArea (t), "M", tr.mute.load(), Pequod::Colours::danger.brighter (0.3f));
+        drawToggle (soloArea (t), "S", tr.solo.load(), juce::Colour (0xffffc040));
 
         // steps
         for (int s = 0; s < len; ++s)
         {
             const auto r = stepArea (t, s).toFloat();
             const int v = pt.steps[(size_t) t][(size_t) s].load();
-            const bool beatStart = s % spb == 0;
             const bool here = s == playStep;
+            const auto cap = caps[(s / spb) % 4];
+            // (a key that's on is lit from inside, as well as its LED)
+            hw::key (g, r, here ? cap.brighter (0.3f) : cap, v > 0, v > 0 && ! silent, cap.brighter (v == 1 ? 0.25f : 0.6f));
 
-            g.setColour (here ? Pequod::Colours::panelHi.brighter (0.25f) : (beatStart ? Pequod::Colours::panelHi.brighter (0.06f) : Pequod::Colours::panelHi));
-            g.fillRoundedRectangle (r, 2.0f);
-
-            if (v > 0)
+            // the LED: off, soft (dim), on, accent (bright, with a halo)
+            const float rad = juce::jlimit (2.5f, 6.0f, juce::jmin (r.getWidth(), r.getHeight()) * 0.16f);
+            const juce::Point<float> c { r.getCentreX(), r.getY() + juce::jmax (rad + 3.0f, r.getHeight() * 0.3f) };
+            auto colour = silent ? led.withSaturation (0.1f) : led;
+            if (v == 0)
             {
-                const auto c = v == 1 ? Pequod::Colours::mustardLo : v == 2 ? Pequod::Colours::mustard : Pequod::Colours::mustard.brighter (0.35f);
-                const auto inner = v == 1 ? r.reduced (r.getWidth() * 0.22f, r.getHeight() * 0.22f) : r;
-                g.setColour (silent ? c.withSaturation (0.15f).darker (0.3f) : c);
-                g.fillRoundedRectangle (inner, 2.0f);
+                g.setColour (juce::Colour (0xff141814));
+                g.fillEllipse (c.x - rad, c.y - rad, rad * 2.0f, rad * 2.0f);
+            }
+            else
+            {
+                const float level = v == 1 ? 0.45f : v == 2 ? 0.85f : 1.0f;
+                g.setGradientFill (juce::ColourGradient (colour.withAlpha (0.5f * level), c.x, c.y, colour.withAlpha (0.0f), c.x + rad * (v == 3 ? 4.0f : 2.6f), c.y, true));
+                g.fillEllipse (c.x - rad * 4.0f, c.y - rad * 4.0f, rad * 8.0f, rad * 8.0f);
+                g.setColour (colour.withMultipliedBrightness (0.45f + 0.55f * level));
+                g.fillEllipse (c.x - rad, c.y - rad, rad * 2.0f, rad * 2.0f);
+                g.setColour (juce::Colours::white.withAlpha (0.5f * level));
+                g.fillEllipse (c.x - rad * 0.45f, c.y - rad * 0.5f, rad * 0.6f, rad * 0.45f);
                 if (v == 3)
                 {
-                    g.setColour (Pequod::Colours::text);
-                    g.drawRoundedRectangle (r.reduced (1.0f), 2.0f, 1.5f);
+                    g.setColour (colour.withAlpha (0.9f));
+                    g.drawRoundedRectangle (r.reduced (0.5f), 2.5f, 1.4f);
                 }
-            }
-            if (here)
-            {
-                g.setColour (Pequod::Colours::text.withAlpha (0.55f));
-                g.drawRoundedRectangle (r, 2.0f, 1.0f);
             }
         }
 
-        // meter
+        // meter: a ladder of LEDs
         auto m = row.withX (getWidth() - meterWidth - 2).withWidth (meterWidth).reduced (2, 4).toFloat();
-        g.setColour (Pequod::Colours::well);
-        g.fillRect (m);
-        g.setColour (level[(size_t) t] > 0.95f ? Pequod::Colours::danger : Pequod::Colours::mustard);
-        g.fillRect (m.withTop (m.getBottom() - m.getHeight() * level[(size_t) t]));
+        hw::ledLadder (g, m, level[(size_t) t], juce::jlimit (4, 10, (int) (m.getHeight() / 4.0f)), Pequod::Colours::mustard);
     }
-
 }
 
 } // namespace thoreau

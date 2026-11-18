@@ -22,14 +22,13 @@ void BpmDisplay::setValue (double bpm, bool fromReel)
 
 void BpmDisplay::paint (juce::Graphics& g)
 {
-    auto r = getLocalBounds().toFloat();
-    g.setColour (juce::Colours::black);
-    g.fillRoundedRectangle (r, 4.0f);
-    g.setColour (Pequod::Colours::line);
-    g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
-    g.setColour (Pequod::Colours::mustard);
+    // the tempo, in a display window: lit digits over their unlit segments
+    auto r = getLocalBounds().toFloat().reduced (2.0f);
+    hw::window (g, r);
     g.setFont (heading (r.getHeight() * 0.62f));
-    g.drawText (juce::String (value, 1), r.withTrimmedRight (34), juce::Justification::centredRight);
+    hw::lit (g, juce::String (value, 1), r.withTrimmedRight (34), Pequod::Colours::mustard.brighter (0.2f), juce::Justification::centredRight,
+             value >= 100.0 ? "888.8" : "88.8");
+    hw::glass (g, r);
     g.setFont (heading (10.0f));
     g.setColour (Pequod::Colours::textDim);
     g.drawText ("BPM", r.reduced (6, 5), juce::Justification::topRight);
@@ -860,34 +859,57 @@ void MainComponent::paint (juce::Graphics& g)
 {
     g.fillAll (Pequod::Colours::bg);
 
+    // the machine's case: wooden ends, and the sequencer's own section of the top panel
+    {
+        auto bodyArea = getLocalBounds().withTrimmedTop (headerArea.getBottom()).withTrimmedBottom (statusArea.getHeight());
+        hw::panel (g, bodyArea.toFloat(), juce::Colour (0xff1d201d));
+        for (auto cheek : { bodyArea.withWidth (8), bodyArea.withLeft (bodyArea.getRight() - 8) })
+        {
+            auto c = cheek.toFloat();
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff5a3720), c.getX(), 0.0f, juce::Colour (0xff3a2212), c.getRight(), 0.0f, false));
+            g.fillRect (c);
+            juce::Random grain (cheek.getX() + 11);
+            for (int k = 0; k < 40; ++k)
+            {
+                g.setColour (juce::Colours::black.withAlpha (0.08f + grain.nextFloat() * 0.1f));
+                g.drawVerticalLine ((int) (c.getX() + grain.nextFloat() * c.getWidth()), c.getY() + grain.nextFloat() * c.getHeight() * 0.5f,
+                                    c.getY() + c.getHeight() * (0.5f + grain.nextFloat() * 0.5f));
+            }
+        }
+        drawModulePanel (g, patternBarArea.getUnion (gridArea).expanded (6, 4).toFloat(), engine.getPlayMode() == PlayMode::pattern);
+    }
+
     // header: the bar every part has (THOREAU's is taller: its transport lives in it)
     partui::drawBar (g, headerArea, partColour());
     partui::drawWordmark (g, logoArea, "THOREAU", "DRUM MACHINE", partColour(), heading (30.0f));
 
     // counter
     {
-        auto c = counterArea.toFloat();
-        g.setColour (juce::Colours::black);
-        g.fillRoundedRectangle (c, 4.0f);
-        g.setColour (Pequod::Colours::line);
-        g.drawRoundedRectangle (c.reduced (0.5f), 4.0f, 1.0f);
+        auto c = counterArea.toFloat().reduced (2.0f);
+        hw::window (g, c);
         const bool tape = engine.getClockSource() == ClockSource::hawthorne;
         const bool rolling = engine.isRolling();
-        g.setColour (engine.isTapeRecording() ? Pequod::Colours::danger : Pequod::Colours::mustard);
         g.setFont (heading (c.getHeight() * 0.5f));
-        g.drawText (tape && ! engine.isTapeSynced() ? juce::String ("--.-.-") : counterText(), c.withTrimmedTop (8), juce::Justification::centred);
+        const auto shown = tape && ! engine.isTapeSynced() ? juce::String ("--.-.-") : counterText();
+        hw::lit (g, shown, c.withTrimmedTop (8), engine.isTapeRecording() ? Pequod::Colours::danger.brighter (0.3f) : Pequod::Colours::mustard.brighter (0.2f),
+                 juce::Justification::centred, [&shown]
+                 {
+                     juce::String ghost;      // (every segment of each digit)
+                     for (auto ch : shown) ghost += juce::CharacterFunctions::isDigit (ch) || ch == '-' ? juce::juce_wchar ('8') : ch;
+                     return ghost;
+                 }());
         g.setFont (heading (10.0f));
         g.setColour (rolling ? Pequod::Colours::mustard : Pequod::Colours::textDim);
         const juce::String state = tape ? (! engine.isTapeSynced() ? "NO TAPE" : engine.isTapeRecording() ? "TAPE REC" : rolling ? "TAPE PLAY" : "TAPE STOP")
                                         : (rolling ? "PLAY" : "STOP");
         g.drawText (state, c.reduced (7, 4), juce::Justification::topLeft);
         g.drawText ("BAR.BEAT", c.reduced (7, 4), juce::Justification::topRight);
+        hw::glass (g, c);
     }
 
     g.setFont (heading (10.0f));
-    g.setColour (Pequod::Colours::textDim);
-    g.drawText ("SWING " + juce::String (juce::roundToInt (project.swing.load())), swingLabelArea, juce::Justification::centred);
-    g.drawText ("OUT " + juce::String (project.masterDb.load(), 1), masterLabelArea, juce::Justification::centred);
+    hw::engraved (g, "SWING " + juce::String (juce::roundToInt (project.swing.load())), swingLabelArea.toFloat(), Pequod::Colours::textDim, juce::Justification::centred);
+    hw::engraved (g, "OUT " + juce::String (project.masterDb.load(), 1), masterLabelArea.toFloat(), Pequod::Colours::textDim, juce::Justification::centred);
 
     // pattern bar caption
     g.setColour (Pequod::Colours::textDim);
@@ -939,12 +961,18 @@ void MainComponent::paint (juce::Graphics& g)
                 lines.add ("> project: " + projectFile.getFileNameWithoutExtension());
         }
 
+        // (the readout: a green screen in the panel)
+        auto screen = r.withTrimmedBottom (36).toFloat();
+        hw::window (g, screen, juce::Colour (0xff07110a));
+        auto text = screen.reduced (10.0f, 6.0f).toNearestInt();
         g.setFont (heading (12.5f, false));
         for (auto& l : lines)
         {
-            g.setColour (l.containsIgnoreCase ("no tape") || l.containsIgnoreCase ("check") ? Pequod::Colours::danger.brighter (0.2f) : Pequod::Colours::text);
-            g.drawFittedText (l, r.removeFromTop (20), juce::Justification::centredLeft, 1);
+            hw::lit (g, l, text.removeFromTop (20).toFloat(),
+                     l.containsIgnoreCase ("no tape") || l.containsIgnoreCase ("check") ? Pequod::Colours::danger.brighter (0.4f) : Pequod::Colours::mustard.brighter (0.25f),
+                     juce::Justification::centredLeft);
         }
+        hw::glass (g, screen);
     }
 
     // status bar

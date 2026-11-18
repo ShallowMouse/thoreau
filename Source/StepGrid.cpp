@@ -51,7 +51,7 @@ void StepGrid::setStep (int t, int s, int v)
     cell = (uint8_t) v;
     engine.project.changed();
     if (onEdited) onEdited();
-    repaint (stepArea (t, s).expanded (2));
+    repaint (stepArea (t, s).expanded (8));     // (with its LED's glow)
 }
 
 //==============================================================================
@@ -114,20 +114,32 @@ void StepGrid::mouseMove (const juce::MouseEvent& e)
 //==============================================================================
 void StepGrid::tick()
 {
+    // Only what moved is drawn again: the step column the playhead left and the one it's on, and
+    // each voice's pad and meter while they glow - not the whole grid thirty times a second.
     const int ps = engine.isRolling() && engine.getPlayingPattern() == pattern ? engine.getPlayingStep() : -1;
-    bool dirty = ps != playStep;
-    playStep = ps;
+    if (ps != playStep)
+    {
+        auto column = [this] (int s)
+        {
+            if (s >= 0) repaint (stepArea (0, s).getUnion (stepArea (kTracks - 1, s)).expanded (8));
+        };
+        column (playStep);
+        column (ps);
+        playStep = ps;
+    }
     for (int t = 0; t < kTracks; ++t)
     {
         const float h = engine.popTrackHit (t);
         const float pk = engine.popTrackPeak (t);
         const float nh = juce::jmax (h, hit[(size_t) t] * 0.82f);
         const float nl = juce::jmax (juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (pk, -48.0f) + 48.0f) / 48.0f), level[(size_t) t] * 0.88f);
-        if (std::abs (nh - hit[(size_t) t]) > 0.01f || std::abs (nl - level[(size_t) t]) > 0.01f) dirty = true;
+        const bool padMoved = std::abs (nh - hit[(size_t) t]) > 0.01f;
+        const bool meterMoved = std::abs (nl - level[(size_t) t]) > 0.01f;
         hit[(size_t) t] = nh < 0.02f ? 0.0f : nh;
         level[(size_t) t] = nl < 0.01f ? 0.0f : nl;
+        if (padMoved)   repaint (padArea (t).expanded (2));
+        if (meterMoved) repaint (rowArea (t).withX (getWidth() - meterWidth - 2).withWidth (meterWidth));
     }
-    if (dirty) repaint();
 }
 
 void StepGrid::paint (juce::Graphics& g)

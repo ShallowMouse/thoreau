@@ -354,8 +354,9 @@ void MainComponent::initialiseAudio()
             project.resetToDefault();
             project.beatsPerBar = juce::jlimit (2, 12, made.beatsPerBar);
             const auto folder = melville::studioFolder();
-            projectFile = folder != juce::File() ? folder.getChildFile ("THOREAU.thoreau")
-                                                 : projectsFolder().getChildFile ("Untitled.thoreau").getNonexistentSibling();
+            // (no reel on the deck - MELVILLE starting up clean - a scratch song, not saved
+            //  anywhere, so starting up doesn't leave a new Untitled file behind every time)
+            projectFile = folder != juce::File() ? folder.getChildFile ("THOREAU.thoreau") : juce::File();
             afterProjectLoad();
             saveProject();
         } });

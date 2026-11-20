@@ -36,6 +36,7 @@ namespace
             case Kind::china: case Kind::splash: case Kind::gong: s.close = 0.3f; s.oh = 1.0f;  s.room = 0.55f; break;
             case Kind::analog: case Kind::tambourine: case Kind::claps:
             case Kind::syndrum: case Kind::cowbell:               s.close = 0.9f; s.oh = 0.6f;  s.room = 0.6f;  break;
+            case Kind::simmons:                                   s.close = 1.0f; s.oh = 0.0f;  s.room = 0.6f;  break;
         }
         return s;
     }
@@ -111,6 +112,23 @@ namespace
         Groove g;
         g.bpm = bpm; g.swing = swing; g.beat = beat; g.fill = fill; g.length = length; g.stepsPerBeat = stepsPerBeat;
         return g;
+    }
+
+    /** An early-80s drum machine: every slot is its 8-bit sample at `rate` Hz, straight out of
+        its own output (no overheads; a little of the kit's room for the reverb it went to). */
+    void machine (KitDef& k, float rate, float room = 0.25f)
+    {
+        k.acoustic = false;
+        for (auto& s : k.slots)
+        {
+            s.model.machine = rate;
+            s.close = 1.0f; s.oh = 0.0f; s.room = room;
+        }
+    }
+
+    SlotDef simmons (const char* name, float pitch, float ring, float colour, float click, float noise, float bend, float levelDb, int midi)
+    {
+        return slot (name, model (Kind::simmons, pitch, ring, colour, click, noise, bend), levelDb, midi);
     }
 
     using Rows = std::array<const char*, kTracks>;
@@ -472,6 +490,89 @@ namespace
             k.groove = groove (100.0, 50.0f,
                 Rows { "x.......x.x.....", "....x.......x...", "....x.......x...", _, "x.o.x.o.x.o.x.o.", _, _, _, _, _, _, "..o...o...o...o." },
                 Rows { "x.......x.x.....", "....x.......x...", "....x.......x.x.", _, "x.o.x.o.x.o.....", "..............o.", _, _, _, _, _, "..o...o...o...o." });
+            all.push_back (k);
+        }
+
+        //----------------------------------------------------------------------
+        // Simmons SDS-V: the hexagonal pads of the early 80s, with real hats and cymbals
+        {
+            auto k = kit ("SIMMONS '82",
+                          "Simmons SDS-V: the hexagon pads. Synthesised kick and snare, toms that bend down, real hats and cymbals beside them. Gated room.",
+                          1.0f,
+                          { simmons ("KICK", 58, 0.45f, 0.3f, 0.8f, 0.05f, 0.35f, 0, 36),
+                            simmons ("SNARE", 190, 0.28f, 0.6f, 0.6f, 0.8f, 0.2f, -1, 38),
+                            simmons ("SNARE 2", 235, 0.2f, 0.78f, 0.75f, 1.0f, 0.1f, -2, 40),
+                            simmons ("RIM", 420, 0.08f, 0.85f, 0.9f, 0.5f, 0.1f, -7, 37),
+                            closedHat (0.1f, 0.6f, 17, -10), openHat (1.3f, 0.6f, 17, -12),
+                            simmons ("FLOOR TOM", 92, 0.75f, 0.4f, 0.5f, 0.25f, 0.8f, -2, 41),
+                            simmons ("TOM 2", 125, 0.7f, 0.42f, 0.5f, 0.25f, 0.8f, -2, 45),
+                            simmons ("TOM 1", 165, 0.65f, 0.45f, 0.5f, 0.25f, 0.8f, -2, 48),
+                            crash (2.8f, 0.6f, 27, -12), ride (4.0f, 0.55f, 37, -12),
+                            simmons ("TOM 4", 70, 0.9f, 0.35f, 0.5f, 0.2f, 0.95f, -2, 43) });
+            for (int t : { 4, 5, 9, 10 }) { k.slots[(size_t) t].oh = 0.9f; k.slots[(size_t) t].close = 0.6f; }
+            k.reverb = room (1.8f, 1.6f, 0.4f, 8.0f, 0.6f, 180.0f, 260.0f, 0.5f);
+            k.compressor = compressor (4, 90, 4, 0.2f);
+            k.bus = bus (2.0f, 2.5f, 30.0f, 20000.0f, 0.5f);
+            knobs (k, 0.0f, -8.0f, -6.0f, 0.4f, 0.1f);
+            k.groove = groove (112.0, 50.0f,
+                Rows { "x.......x.x.....", "....x.......x...", _, _, "x.x.x.x.x.x.x.x.", _, _, _, _, _, _, _ },
+                Rows { "x.......x.......", "....x...........", _, _, "x.x.x.x.x.x.....", _, "............oxox", "..........xx....", "........xx......", _, _, "..............x." });
+            all.push_back (k);
+        }
+
+        //----------------------------------------------------------------------
+        // LinnDrum (LM-2): real drums in 8-bit samples, the sound of early-80s pop
+        {
+            auto k = kit ("LINNDRUM",
+                          "LinnDrum LM-2: real drums sampled to 8 bits, the same every hit. Its kick, snare, claps, hats, three toms, crash, ride and cowbell.",
+                          0.8f,
+                          { slot ("KICK", model (Kind::kick, 56, 0.28f, 0.5f, 0.75f, 0.75f, 0.6f, 101), 0, 36),
+                            slot ("SNARE", model (Kind::snare, 205, 0.3f, 0.6f, 0.7f, 0.55f, 0.6f, 102), -1, 38),
+                            claps (0.65f, -4),
+                            xstick (260, -4),
+                            closedHat (0.07f, 0.6f, 18, -8), openHat (0.7f, 0.6f, 18, -10),
+                            tom ("LOW TOM", 90, 0.45f, 0.5f, 0.6f, 0.6f, 0.2f, -2, 41),
+                            tom ("MID TOM", 125, 0.4f, 0.5f, 0.6f, 0.6f, 0.2f, -2, 45),
+                            tom ("HIGH TOM", 165, 0.35f, 0.52f, 0.6f, 0.6f, 0.2f, -2, 48),
+                            crash (1.8f, 0.55f, 28, -9), ride (2.4f, 0.55f, 38, -10),
+                            slot ("COWBELL", model (Kind::cowbell, 545, 0.35f, 0.6f, 0.6f, 0.0f, 0.0f, 103), -8, 56) });
+            machine (k, 28000.0f);
+            k.slots[9].model.machine = k.slots[10].model.machine = 20000.0f;    // (the cymbals at a lower rate, to fit the memory)
+            k.reverb = room (1.4f, 1.2f, 0.45f, 15.0f, 0.5f, 200.0f);
+            k.compressor = compressor (5, 100, 3);
+            k.bus = bus (1.5f, 1.5f, 30.0f, 18000.0f, 0.5f);
+            knobs (k, 0.0f, -60.0f, -10.0f, 0.3f, 0.1f);
+            k.groove = groove (118.0, 54.0f,
+                Rows { "x.....x...x.....", "....x.......x...", "....x.......x...", _, "x.xxx.xxx.xxx.xx", _, _, _, _, _, _, _ },
+                Rows { "x.....x...x.....", "....x.......x...", "....x.......x...", _, "x.xxx.xxx.xx....", "..............o.", "............x.x.", "........x.x.....", _, _, _, "x...x...x...x..." });
+            all.push_back (k);
+        }
+
+        //----------------------------------------------------------------------
+        // Oberheim DMX: harder, punchier 8-bit samples (New Order's Blue Monday, early hip-hop)
+        {
+            auto k = kit ("OBERHEIM DMX",
+                          "Oberheim DMX: punchy 8-bit drum samples, the same every hit. Hard kick and snare, claps, hats, toms, crash, ride and tambourine.",
+                          0.8f,
+                          { slot ("KICK", model (Kind::kick, 50, 0.35f, 0.45f, 0.9f, 0.7f, 0.85f, 111), 0, 36),
+                            slot ("SNARE", model (Kind::snare, 185, 0.32f, 0.65f, 0.85f, 0.5f, 0.75f, 112), -1, 38),
+                            claps (0.55f, -4),
+                            rimshot (300, 0.12f, 0.7f, -5),
+                            closedHat (0.06f, 0.65f, 19, -8), openHat (0.55f, 0.65f, 19, -10),
+                            tom ("LOW TOM", 82, 0.5f, 0.5f, 0.7f, 0.55f, 0.15f, -2, 41),
+                            tom ("MID TOM", 112, 0.45f, 0.5f, 0.7f, 0.55f, 0.15f, -2, 45),
+                            tom ("HIGH TOM", 150, 0.4f, 0.52f, 0.7f, 0.55f, 0.15f, -2, 48),
+                            crash (1.6f, 0.6f, 29, -9), ride (2.2f, 0.55f, 39, -10),
+                            tambourine (0.6f, -9) });
+            machine (k, 25000.0f, 0.15f);
+            k.slots[9].model.machine = k.slots[10].model.machine = 18000.0f;
+            k.reverb = room (0.9f, 0.7f, 0.5f, 10.0f, 0.5f, 220.0f);
+            k.compressor = compressor (3, 80, 4);
+            k.bus = bus (2.0f, 1.0f, 30.0f, 17000.0f, 0.8f);
+            knobs (k, 0.0f, -60.0f, -14.0f, 0.4f, 0.15f);
+            k.groove = groove (122.0, 50.0f,
+                Rows { "x.x.x.x.x.x.x.x.", "....x.......x...", _, _, "..x...x...x...x.", _, _, _, _, _, _, _ },
+                Rows { "x.x.x.x.x.x.xxxx", "....x.......x...", "............x.x.", _, "..x...x...x.....", "..............o.", _, _, _, _, _, _ });
             all.push_back (k);
         }
 

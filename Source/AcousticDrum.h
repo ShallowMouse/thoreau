@@ -126,6 +126,9 @@ private:
     float outGain = 1, lp = 0, lpCoef = 1, hpState = 0, hpCoef = 0;
     float chokeGain = 1, chokeCoef = 1;
     double chokeAt = -1.0;
+    // a drum machine's sample playback: 8-bit companded DAC at its own rate, then its output filter
+    double dacStep = 0.0, dacPhase = 1.0;
+    float dacHeld = 0.0f, dacLp1 = 0.0f, dacLp2 = 0.0f, dacCoef = 1.0f;
     double now = 0.0;                            // samples since start
     double lastHit = 0.0;
     float peakAmp = 0;                           // for the end-of-sound test

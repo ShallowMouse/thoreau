@@ -136,6 +136,7 @@ void AcousticDrum::addBurst (double at, float amp, double decaySeconds, double a
 //==============================================================================
 void AcousticDrum::start (const DrumModel& m, const VoiceParams& p, float velocity, double onset, uint32_t seed) noexcept
 {
+    if (m.machine > 0.0f) seed = m.seed;              // a drum machine's sample: the same every time
     model = m;
     params = p;
     active = true;
@@ -167,7 +168,7 @@ void AcousticDrum::start (const DrumModel& m, const VoiceParams& p, float veloci
     Rng H (seed ^ 0x51ed27u);
     const float tuneMul = (float) std::pow (2.0, p.tune / 12.0);
     const float ringMul = (float) std::pow (2.0, (p.decay - 0.5) * 3.0);
-    pitch  = m.pitch * tuneMul * H.jitter (0.003f);
+    pitch  = m.pitch * tuneMul * (m.machine > 0.0f ? 1.0f : H.jitter (0.003f));   // (a sample doesn't wander)
     ring   = m.ring * ringMul;
     bright = clamp01 (m.bright + (p.tone - 0.5f) * 0.8f);
     hard   = clamp01 (m.hard + (p.snap - 0.5f) * 0.8f);
@@ -411,6 +412,22 @@ void AcousticDrum::start (const DrumModel& m, const VoiceParams& p, float veloci
             lpHz = 2500.0f + bright * 12000.0f;
             break;
 
+        case Kind::simmons:
+        {
+            // the SDS-V voice: an oscillator (near a sine, a little third harmonic) that bends down
+            // from above its pitch, a band of noise for the snare's crack, and a click from the pad
+            addMode (pitch, ring, 1.0f, 0.0f);
+            addMode (pitch * 3.0, ring * 0.35, 0.07f, 0.0f);
+            numGlide = numModes;
+            glideAmount = 0.15f + 1.35f * extra;
+            glideCoef = (float) std::exp (-16.0 / ((0.05 + 0.2 * ring) * sr));
+            filters[fBody].bandpass (sr, 900.0 + 6000.0 * bright, 0.6); filterGain[fBody] = 2.2f;
+            filters[fTick].highpass (sr, 3500.0, 0.7); filterGain[fTick] = 1.0f;
+            outGain = 0.6f;
+            lpHz = 6000.0f + bright * 12000.0f;
+            break;
+        }
+
         case Kind::cowbell:
         {
             static const float ratio[] = { 1.0f, 1.505f, 2.37f, 3.36f, 4.64f, 6.1f };
@@ -453,9 +470,19 @@ void AcousticDrum::start (const DrumModel& m, const VoiceParams& p, float veloci
             case Kind::claps:      trimDb = -5.0f;  break;
             case Kind::syndrum:    trimDb = 2.0f;   break;
             case Kind::cowbell:    trimDb = -8.0f;  break;
+            case Kind::simmons:    trimDb = 0.0f;   break;
             case Kind::analog:     break;
         }
         outGain *= std::pow (10.0f, trimDb / 20.0f);
+    }
+
+    // a drum machine: its DAC's rate, and its output filter (just under half of it)
+    dacStep = m.machine > 0.0f ? m.machine / sr : 0.0;
+    dacPhase = 1.0; dacHeld = dacLp1 = dacLp2 = 0.0f;
+    dacCoef = m.machine > 0.0f ? (float) (1.0 - std::exp (-twoPi * juce::jmin (0.42 * m.machine, 0.45 * sr) / sr)) : 1.0f;
+    if (m.machine > 0.0f)
+    {
+        lpHz = juce::jmin (lpHz, 0.45f * m.machine);      // (recorded band-limited for its rate)
     }
 
     lpCoef = (float) (1.0 - std::exp (-twoPi * lpHz / sr));
@@ -488,6 +515,12 @@ void AcousticDrum::excite (float velocity, double onset, uint32_t seed) noexcept
     if (model.kind == Kind::analog) return;
     active = true;
     quietChunks = 0;
+    if (model.machine > 0.0f)
+    {
+        seed = model.seed;                               // a sample: the same every hit
+        rng = (seed * 2246822519u) ^ 0x2545f491u;
+        if (rng == 0) rng = 1;
+    }
     Rng H (seed);
     const double at = now + juce::jmax (0.0, onset);
     const float vel = juce::jlimit (0.05f, 1.0f, velocity);
@@ -612,6 +645,12 @@ void AcousticDrum::excite (float velocity, double onset, uint32_t seed) noexcept
         case Kind::syndrum:
             addPulse (at, 0.0006 * wmul, amp, 0.0f);
             addBurst (at, amp * 0.15f, 0.004, 0.0, fTick);
+            break;
+
+        case Kind::simmons:
+            addPulse (at, 0.0008 * wmul, amp, 0.0f);
+            addBurst (at, amp * clamp01 (model.damp) * 0.75f, 0.03 + 0.45 * ring * clamp01 (model.damp), 0.0, fBody);
+            addBurst (at, amp * 0.6f * hard, 0.0025, 0.0, fTick);
             break;
 
         case Kind::cowbell:
@@ -787,6 +826,24 @@ void AcousticDrum::renderChunk (float* out, int n) noexcept
 
         if (chokeAt >= 0.0 && now >= chokeAt) chokeGain *= chokeCoef;
         o *= chokeGain;
+
+        if (dacStep > 0.0)
+        {
+            // the 8-bit companding DAC (mu-law-like, as the AM6070 in the LinnDrum and DMX), sampled
+            // at the machine's rate and held, then its output filter
+            dacPhase += dacStep;
+            if (dacPhase >= 1.0)
+            {
+                dacPhase -= std::floor (dacPhase);
+                const float a = juce::jlimit (0.0f, 1.0f, std::abs (o) * 0.8f);
+                const float c = std::log1p (255.0f * a) / std::log1p (255.0f);
+                const float q = std::round (c * 127.0f) / 127.0f;
+                dacHeld = std::copysign ((std::pow (256.0f, q) - 1.0f) / 255.0f / 0.8f, o);
+            }
+            dacLp1 += (dacHeld - dacLp1) * dacCoef;
+            dacLp2 += (dacLp1 - dacLp2) * dacCoef;
+            o = dacLp2;
+        }
 
         out[k] += o;
         chunkPeak = juce::jmax (chunkPeak, std::abs (o));

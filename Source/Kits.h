@@ -14,7 +14,8 @@ enum class Kind : uint8_t
     analog,
     kick, snare, rimshot, sidestick, brush, sweep, tom,
     hatClosed, hatOpen, hatPedal, crash, ride, rideBell, china, splash, gong,
-    tambourine, claps, syndrum, cowbell
+    tambourine, claps, syndrum, cowbell,
+    simmons             // an early-80s synth drum (Simmons SDS-V): a bending oscillator, noise and a click
 };
 
 inline bool isMembrane (Kind k) noexcept { return k >= Kind::kick && k <= Kind::tom; }
@@ -33,11 +34,13 @@ struct DrumModel
     float extra = 0.5f;      // kick: beater click; snare: wires; tom: resonant head; china: trash;
                              // tambourine: jingles; claps: how many people; syndrum: sweep
     uint32_t seed = 1;       // cymbals: which cymbal (its partials)
+    float machine = 0.0f;    // > 0: heard as a drum machine's 8-bit companded sample played at this rate (Hz),
+                             // the same every hit (LinnDrum, Oberheim DMX)
 
     bool operator== (const DrumModel& o) const noexcept
     {
         return kind == o.kind && analog == o.analog && pitch == o.pitch && ring == o.ring && bright == o.bright
-            && hard == o.hard && damp == o.damp && extra == o.extra && seed == o.seed;
+            && hard == o.hard && damp == o.damp && extra == o.extra && seed == o.seed && machine == o.machine;
     }
 };
 

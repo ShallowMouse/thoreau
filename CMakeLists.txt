@@ -122,5 +122,6 @@ if(THOREAU_BUILD_TESTS)
         juce::juce_core
         juce::juce_dsp
         juce::juce_events
+        juce::juce_graphics
         juce::juce_recommended_config_flags)
 endif()

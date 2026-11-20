@@ -330,7 +330,7 @@ static void testTapeSyncEndToEnd()
 static const char* kindName (Kind k)
 {
     static const char* n[] = { "analog", "kick", "snare", "rimshot", "sidestick", "brush", "sweep", "tom", "hatClosed", "hatOpen",
-                               "hatPedal", "crash", "ride", "rideBell", "china", "splash", "gong", "tambourine", "claps", "syndrum", "cowbell" };
+                               "hatPedal", "crash", "ride", "rideBell", "china", "splash", "gong", "tambourine", "claps", "syndrum", "cowbell", "simmons" };
     return n[(int) k];
 }
 
@@ -343,7 +343,7 @@ static void testKitPieces()
     for (int k = 0; k < (int) kits().size(); ++k)
     {
         const auto& kit = kits()[(size_t) k];
-        if (! kit.acoustic) continue;
+        if (kit.slots[0].model.kind == Kind::analog) continue;     // (the modelled drums: acoustic kits and the drum machines)
         for (int t = 0; t < kTracks; ++t)
         {
             const auto& slot = kit.slots[(size_t) t];
@@ -533,7 +533,7 @@ static void testHats()
     double worstLow = 0, worstCentroid = 1e9, worstCentroidHigh = 0, worstFlat = 1;
     for (auto& kit : kits())
     {
-        if (! kit.acoustic) continue;
+        if (kit.slots[0].model.kind == Kind::analog) continue;     // (the modelled drums: acoustic kits and the drum machines)
         for (int t : { 4, 5 })
         {
             const auto& slot = kit.slots[(size_t) t];

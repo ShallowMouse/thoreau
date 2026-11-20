@@ -840,9 +840,13 @@ void MainComponent::resized()
     gridArea = body;
     grid.setBounds (body);
 
-    syncArea = side.removeFromTop (240);
-    side.removeFromTop (10);
+    // (inside MELVILLE there's nothing to link: the panel goes, and the song list has the room)
+    syncArea = melville::isHosted() ? juce::Rectangle<int>() : side.removeFromTop (240);
+    if (! syncArea.isEmpty()) side.removeFromTop (10);
     song.setBounds (side);
+    for (auto* b : { (juce::Component*) &barOneButton, (juce::Component*) &nudgeEarly, (juce::Component*) &nudgeLate })
+        b->setVisible (! melville::isHosted());
+    if (! syncArea.isEmpty())
     {
         auto b = syncArea.reduced (24, 12).removeFromBottom (28);
         barOneButton.setBounds (b.removeFromLeft (b.getWidth() - 150).reduced (2, 0));
@@ -916,7 +920,8 @@ void MainComponent::paint (juce::Graphics& g)
     g.setColour (Pequod::Colours::textDim);
     g.setFont (heading (11.0f));
 
-    // sync panel
+    // sync panel (standalone only: the link to Hawthorne)
+    if (! syncArea.isEmpty())
     {
         const bool tape = engine.getClockSource() == ClockSource::hawthorne;
         drawModulePanel (g, syncArea.toFloat(), tape);

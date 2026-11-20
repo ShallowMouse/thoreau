@@ -540,14 +540,19 @@ bool DrumEngine::getHostedClock (hawthorne::NetSender::TapeClock& c, juce::int64
     double pos = 0.0, rate = 0.0; int fl = 0;
     if (! melville::tapePositionAt (frame, pos, rate, fl)) return false;
     auto& t = melville::transport();
+    // MELVILLE's tape counts the reel's samples, which run at the reel's own rate; the chase
+    // counts beats in ours, so a reel at 44.1 kHz on a 48 kHz interface (or the other way
+    // round) would run us fast or slow against everything else. In our samples, then.
+    const double reelRate = t.reelRate.load();
+    const double toOurs = reelRate > 1000.0 ? sampleRate.load() / reelRate : 1.0;
     c.session = netOut.getSession();
     c.senderFrame = (double) frame;
-    c.tapePos = pos;
-    c.tapePerFrame = rate;
+    c.tapePos = pos * toOurs;
+    c.tapePerFrame = rate * toOurs;
     c.flags = fl;
     c.bpm = t.bpm.load();
     c.beatsPerBar = t.beatsPerBar.load();
-    c.barOne = t.barOne.load();
+    c.barOne = t.barOne.load() * toOurs;
     c.tempoRev = t.tempoRev.load();
     c.receivedMs = juce::Time::getMillisecondCounter();
     c.count = ++hostedClockCount;

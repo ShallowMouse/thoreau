@@ -291,7 +291,7 @@ MainComponent::MainComponent()
     updater.checkSoon();
 
     setWantsKeyboardFocus (true);
-    message ("THOREAU " + Updater::currentVersion() + " ready");
+    message ("FULLER " + Updater::currentVersion() + " ready");
     setSize (1400, 860);
     startTimerHz (30);
 }
@@ -406,7 +406,7 @@ void MainComponent::showSettings()
 
     juce::DialogWindow::LaunchOptions o;
     o.content.setOwned (new SettingsPanel (deviceManager, engine, followReelOn, std::move (cb)));
-    o.dialogTitle = "THOREAU settings";
+    o.dialogTitle = "FULLER settings";
     o.dialogBackgroundColour = Pequod::Colours::panel;
     o.useNativeTitleBar = true;
     o.resizable = true;
@@ -536,7 +536,7 @@ void MainComponent::followReel()
         projectFile = file;           // this reel starts from what's loaded now
         saveProject();
         afterProjectLoad();
-        message ("reel \"" + reel + "\": new THOREAU project (from what was loaded)");
+        message ("reel \"" + reel + "\": new FULLER project (from what was loaded)");
     }
 }
 
@@ -555,7 +555,7 @@ void MainComponent::setClock (ClockSource c)
     if (c == ClockSource::hawthorne && ! engine.isNetworkEnabled() && ! melville::isHosted())   // (inside MELVILLE: no network link; MELVILLE does the linking)
         setLink (true, engine.netOut.getName());
     currentReel.clear();
-    message (melville::isHosted() ? "following MELVILLE's transport" : c == ClockSource::hawthorne ? "following Hawthorne's tape" : "on THOREAU's own clock");
+    message (melville::isHosted() ? "following MELVILLE's transport" : c == ClockSource::hawthorne ? "following Hawthorne's tape" : "on FULLER's own clock");
     repaint();
 }
 
@@ -886,7 +886,7 @@ void MainComponent::paint (juce::Graphics& g)
 
     // header: the bar every part has (THOREAU's is taller: its transport lives in it)
     partui::drawBar (g, headerArea, partColour());
-    partui::drawWordmark (g, logoArea, "THOREAU", "DRUM MACHINE", partColour(), heading (30.0f));
+    partui::drawWordmark (g, logoArea, "FULLER", "DRUM MACHINE", partColour(), heading (30.0f));
 
     // counter
     {

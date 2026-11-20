@@ -42,7 +42,7 @@ VoicePanel::VoicePanel (DrumEngine& e) : engine (e)
     knobs[4].slider.setTooltip ("Level into the mix (and its own Hawthorne channel)");
     knobs[5].slider.setTooltip ("Pan in the stereo mix");
 
-    loadButton.setTooltip ("Play a WAV / AIFF / FLAC file on this pad instead of THOREAU's own sound");
+    loadButton.setTooltip ("Play a WAV / AIFF / FLAC file on this pad instead of FULLER's own sound");
     loadButton.onClick = [this]
     {
         chooser = std::make_unique<juce::FileChooser> ("Sample for " + instrumentName (track),

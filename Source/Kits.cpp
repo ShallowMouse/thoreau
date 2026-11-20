@@ -143,8 +143,8 @@ namespace
         // THOREAU's original synth kit (and what old projects open with)
         {
             KitDef k;
-            k.name = "THOREAU ANALOGUE";
-            k.description = "THOREAU's own analogue-style drum synth.";
+            k.name = "FULLER ANALOGUE";
+            k.description = "FULLER's own analogue-style drum synth.";
             k.acoustic = false;
             const float levels[kTracks] = { 0, -2, -4, -6, -7, -8, -4, -4, -4, -9, -10, -9 };
             const float pans[kTracks]   = { 0, 0, 0.1f, -0.15f, 0.25f, 0.25f, -0.35f, 0.0f, 0.35f, -0.3f, 0.3f, -0.2f };

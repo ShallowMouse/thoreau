@@ -212,7 +212,7 @@ bool Project::fromXml (const juce::XmlElement& root, juce::String& error)
 {
     if (! root.hasTagName ("ThoreauProject"))
     {
-        error = "Not a THOREAU project.";
+        error = "Not a FULLER project.";
         return false;
     }
 
@@ -220,8 +220,9 @@ bool Project::fromXml (const juce::XmlElement& root, juce::String& error)
     for (auto& p : patterns) p.clear();
 
     // the kit (by name; projects from before kits were added use THOREAU ANALOGUE)
-    auto findKit = [] (const juce::String& name, int fallback)
+    auto findKit = [] (juce::String name, int fallback)
     {
+        if (name == "THOREAU ANALOGUE") name = "FULLER ANALOGUE";      // (the drum machine was THOREAU before)
         for (int i = 0; i < (int) kits().size(); ++i)
             if (kits()[(size_t) i].name == name) return i;
         return fallback;
@@ -292,7 +293,7 @@ bool Project::fromXml (const juce::XmlElement& root, juce::String& error)
     setSong (song);
 
     if (! missing.isEmpty())
-        error = "Some samples couldn't be found, so those drums use THOREAU's own sound:\n" + missing.joinIntoString ("\n");
+        error = "Some samples couldn't be found, so those drums use FULLER's own sound:\n" + missing.joinIntoString ("\n");
     changed();
     return true;
 }

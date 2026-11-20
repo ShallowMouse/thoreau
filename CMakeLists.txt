@@ -57,8 +57,8 @@ if(THOREAU_BUILD_APP)
         PRODUCT_NAME "THOREAU"
         COMPANY_NAME "PEQUOD"
         BUNDLE_ID    "com.pequod.thoreau"
-        ICON_BIG     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Icon/THOREAU.png"
-        ICON_SMALL   "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Icon/THOREAU-small.png"
+        ICON_BIG     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Icon/FULLER.png"
+        ICON_SMALL   "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Icon/FULLER-small.png"
         VERSION      ${PROJECT_VERSION})
 
     juce_generate_juce_header(Thoreau)

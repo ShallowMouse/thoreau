@@ -552,7 +552,7 @@ void MainComponent::setClock (ClockSource c)
     stopButton.setEnabled (c == ClockSource::internal || melville::isHosted());
     for (auto* b : { &barOneButton, &nudgeEarly, &nudgeLate }) b->setVisible (c == ClockSource::hawthorne && ! melville::isHosted());
     props.getUserSettings()->setValue ("clock", c == ClockSource::hawthorne ? "hawthorne" : "internal");
-    if (c == ClockSource::hawthorne && ! engine.isNetworkEnabled())
+    if (c == ClockSource::hawthorne && ! engine.isNetworkEnabled() && ! melville::isHosted())   // (inside MELVILLE: no network link; MELVILLE does the linking)
         setLink (true, engine.netOut.getName());
     currentReel.clear();
     message (melville::isHosted() ? "following MELVILLE's transport" : c == ClockSource::hawthorne ? "following Hawthorne's tape" : "on THOREAU's own clock");

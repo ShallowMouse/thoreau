@@ -783,27 +783,30 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
 void MainComponent::resized()
 {
     auto r = getLocalBounds();
-    headerArea = r.removeFromTop (72);
+    headerArea = r.removeFromTop (partui::headerHeight);     // (the same bar as every part)
     statusArea = r.removeFromBottom (26);
 
-    auto h = headerArea.reduced (16, 12);
+    auto h = headerArea.withTrimmedBottom (2).reduced (14, 4);   // (keys 14 in from the right, as every part)
     h = partui::placeKeys (h, { &settingsButton, &fileButton });      // (the keys every part has, right)
     if (updateButton.isVisible()) updateButton.setBounds (h.removeFromRight (160).withSizeKeepingCentre (160, partui::keyHeight));
     h.removeFromRight (6);
-    logoArea = h.removeFromLeft (h.getWidth() > 1300 ? 210 : 150);
+    // the name where every part has it (18 in, centred in the bar); what follows starts where
+    // the others' status lines do
+    logoArea = { headerArea.getX() + 18, headerArea.getY(), 190, headerArea.getHeight() };
+    h.removeFromLeft (h.getWidth() > 1100 ? 200 : 150);
     auto clock = h.removeFromLeft (melville::isHosted() ? 0 : 212);   // (inside MELVILLE there's no clock choice)
-    clockInternal.setBounds (clock.removeFromLeft (100).reduced (2, 6));
-    clockTape.setBounds (clock.removeFromLeft (112).reduced (2, 6));
+    clockInternal.setBounds (clock.removeFromLeft (100).reduced (2, 8));
+    clockTape.setBounds (clock.removeFromLeft (112).reduced (2, 8));
     h.removeFromLeft (8);
-    playButton.setBounds (h.removeFromLeft (58).reduced (2, 6));
-    stopButton.setBounds (h.removeFromLeft (58).reduced (2, 6));
-    recButton.setBounds (h.removeFromLeft (52).reduced (2, 6));
+    playButton.setBounds (h.removeFromLeft (58).reduced (2, 8));
+    stopButton.setBounds (h.removeFromLeft (58).reduced (2, 8));
+    recButton.setBounds (h.removeFromLeft (52).reduced (2, 8));
     h.removeFromLeft (12);
-    counterArea = h.removeFromLeft (150).reduced (0, 2);
+    counterArea = h.removeFromLeft (150).reduced (0, 4);
     h.removeFromLeft (10);
-    bpmDisplay.setBounds (h.removeFromLeft (130).reduced (0, 2));
+    bpmDisplay.setBounds (h.removeFromLeft (130).reduced (0, 4));
     h.removeFromLeft (4);
-    auto tempoCol = h.removeFromLeft (70);
+    auto tempoCol = h.removeFromLeft (70).reduced (0, 2);
     if (tapButton.isVisible()) tapButton.setBounds (tempoCol.removeFromTop (tempoCol.getHeight() / 2).reduced (2, 1));
     bpbBox.setBounds (tapButton.isVisible() ? tempoCol.reduced (2, 1) : tempoCol.withSizeKeepingCentre (tempoCol.getWidth(), 26).reduced (2, 0));
     h.removeFromLeft (8);
@@ -814,8 +817,8 @@ void MainComponent::resized()
     masterLabelArea = mk.removeFromBottom (14);
     masterKnob.setBounds (mk);
     h.removeFromLeft (10);
-    modePattern.setBounds (h.removeFromLeft (88).reduced (2, 6));
-    modeSong.setBounds (h.removeFromLeft (68).reduced (2, 6));
+    modePattern.setBounds (h.removeFromLeft (88).reduced (2, 8));
+    modeSong.setBounds (h.removeFromLeft (68).reduced (2, 8));
 
     auto body = r.reduced (12, 8);
     auto bottom = body.removeFromBottom (170);

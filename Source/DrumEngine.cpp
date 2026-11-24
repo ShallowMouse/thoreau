@@ -179,7 +179,8 @@ void DrumEngine::trigger (int track, float velocity, double onset) noexcept
     auto& tv = voices[(size_t) track];
     const auto& slot = project.slotFor (track);
     const auto* sample = tr.sample.load();
-    const auto params = tr.voiceParams();
+    auto params = tr.voiceParams();
+    params.style = slot.model.kind == Kind::analog ? slot.model.analogStyle : 0;
     const double at = juce::jmax (0.0, onset);
 
     // closing the hats (etc.) silences the drum this one chokes

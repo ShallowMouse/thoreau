@@ -108,6 +108,12 @@ void Voice::trigger (Instrument i, const VoiceParams& params, float velocity, co
     const double d = p.decay, tn = p.tone, sn = p.snap;
     gain = 0.35f + 0.65f * vel;
 
+    if (sample == nullptr && p.style > 0)
+    {
+        triggerMachine (tune, d, tn, sn);
+        return;
+    }
+
     if (sample != nullptr)
     {
         tauA = d >= 0.98 ? 1.0e9 : 0.02 + d * d * 3.0;
@@ -226,8 +232,195 @@ float Voice::sampled (double time) noexcept
     return v * transient * (float) std::exp (-time / tauA);
 }
 
+//==============================================================================
+/*  The machines' own circuits (p.style), after Roland's service notes and the published analyses of
+    them (and of the CR-78):
+    - TR-808: kick a bridged-T resonator near 50 Hz kicked by a pulse, a small pitch drop and a long decay,
+      no noise; snare two resonators (about 238 and 476 Hz, TONE balancing them) and high-passed noise
+      (SNAPPY); clap noise through a band-pass with a saw envelope three times, then a short tail; toms
+      resonators with a little pitch drop and some noise; hats, cymbal and cowbell from six square-wave
+      oscillators (205.3, 304.4, 369.6, 522.7, 540, 800 Hz; the cowbell two of them, 540 and 800).
+    - TR-909: kick a waveshaped oscillator swept hard from about 4x its pitch down, with a noise click;
+      snare two swept oscillators and noise; toms swept oscillators; hats and cymbals the 909's 6-bit
+      samples (here: metal noise, quantised to 6 bits).
+    - CR-78: soft, short resonators: a round kick, a snare of tone and noise, rim, noise hats and cymbal,
+      congas and bongo on the toms, guiro on the clap, maracas on the ride, and a cowbell.
+    The rest is estimated.  */
+void Voice::triggerMachine (double tune, double d, double tn, double sn) noexcept
+{
+    const int st = p.style;
+    juce::ignoreUnused (tn);
+    switch (inst)
+    {
+        case Instrument::kick:
+            if (st == 1)      { f0 = 49.0 * tune; f1 = f0 * 1.25; tauP = 0.012; tauA = 0.12 + d * d * 1.6; }
+            else if (st == 2) { f0 = 54.0 * tune; f1 = f0 * (3.0 + 2.0 * sn); tauP = 0.012 + 0.012 * (1.0 - sn); tauA = 0.12 + d * d * 0.7; }
+            else              { f0 = 62.0 * tune; f1 = f0 * 1.15; tauP = 0.01; tauA = 0.06 + d * 0.2; }
+            end = tauA * 9.0;
+            f1s.set (sr, 4000.0, 0.7);
+            break;
+        case Instrument::snare:
+            if (st == 1)      { f0 = 238.0 * tune; f1 = 476.0 * tune; tauA = 0.04 + d * 0.08; tauN = 0.08 + sn * 0.2; f1s.set (sr, 1800.0, 0.7); }
+            else if (st == 2) { f0 = 190.0 * tune; f1 = 330.0 * tune; tauA = 0.05 + d * 0.1; tauN = 0.1 + sn * 0.25; f1s.set (sr, 3500.0, 0.7); tauP = 0.01; }
+            else              { f0 = 220.0 * tune; f1 = 400.0 * tune; tauA = 0.03 + d * 0.05; tauN = 0.06 + d * 0.08; f1s.set (sr, 2500.0, 1.0); }
+            end = juce::jmax (tauA, tauN) * 9.0;
+            break;
+        case Instrument::clap:
+            if (st == 3) { f1s.set (sr, 3200.0 * tune, 2.0); tauN = 0.12 + d * 0.15; end = tauN * 2.0; }       // guiro
+            else         { f1s.set (sr, (st == 2 ? 1300.0 : 1000.0) * tune, 1.8); tauN = 0.08 + d * d * 0.4; end = 0.04 + tauN * 9.0; }
+            break;
+        case Instrument::rim:
+            f0 = (st == 3 ? 2200.0 : 1667.0) * tune; f1 = 455.0 * tune;
+            tauA = 0.006 + d * 0.02;
+            f1s.set (sr, 4000.0, 2.0);
+            end = tauA * 10.0;
+            break;
+        case Instrument::closedHat:
+        case Instrument::openHat:
+        case Instrument::crash:
+        case Instrument::ride:
+        {
+            static const double hatF[6] = { 205.3, 304.4, 369.6, 522.7, 540.0, 800.0 };
+            const bool cym = inst == Instrument::crash;
+            for (int k = 0; k < 6; ++k) metalF[(size_t) k] = hatF[k] * tune * (cym ? 1.0 : 1.0);
+            f1s.set (sr, st == 3 ? 9000.0 : (cym ? 5000.0 : 7100.0), st == 3 ? 1.0 : 1.2);
+            f2s.set (sr, st == 3 ? 7000.0 : (cym ? 3440.0 : 6000.0), 0.7);
+            tauA = inst == Instrument::closedHat ? (st == 3 ? 0.02 : 0.015) + d * 0.06
+                 : inst == Instrument::openHat   ? 0.12 + d * 0.6
+                 : inst == Instrument::ride      ? (st == 3 ? 0.03 + d * 0.04 : 0.5 + d * 2.0)      // CR-78: maracas
+                                                 : 0.6 + d * 2.4;
+            end = tauA * 7.0;
+            break;
+        }
+        case Instrument::lowTom:
+        case Instrument::midTom:
+        case Instrument::highTom:
+        {
+            const double base = st == 3 ? (inst == Instrument::lowTom ? 160.0 : inst == Instrument::midTom ? 240.0 : 380.0)   // congas and bongo
+                                        : (inst == Instrument::lowTom ? 90.0 : inst == Instrument::midTom ? 130.0 : 175.0);
+            f0 = base * tune;
+            f1 = f0 * (st == 2 ? 1.8 : st == 1 ? 1.15 : 1.05);
+            tauP = st == 2 ? 0.03 : 0.04;
+            tauA = st == 3 ? 0.05 + d * 0.12 : 0.15 + d * d * 0.7;
+            f1s.set (sr, f0 * 5.0, 0.8);
+            end = tauA * 9.0;
+            break;
+        }
+        case Instrument::cowbell:
+            f0 = 540.0 * tune; f1 = 800.0 * tune;
+            f1s.set (sr, 2640.0 * tune, 2.2);
+            tauA = 0.05 + d * 0.4;
+            end = 0.02 + tauA * 9.0;
+            break;
+    }
+}
+
+float Voice::synthMachine (double time) noexcept
+{
+    float lp, bp, hp;
+    const int st = p.style;
+    const double sn = p.snap, tn = p.tone;
+    auto sweptPhase = [&] { return f0 * time + (f1 - f0) * tauP * (1.0 - std::exp (-time / tauP)); };
+    auto sixBit = [] (float v) { return std::round (juce::jlimit (-1.0f, 1.0f, v) * 31.0f) / 31.0f; };
+    switch (inst)
+    {
+        case Instrument::kick:
+        {
+            float v = (float) (std::sin (twoPi * sweptPhase()) * std::exp (-time / tauA));
+            if (st == 2)
+            {
+                // the 909's waveshaper and its click
+                v = std::tanh (v * 1.6f) / std::tanh (1.6f);
+                f1s.process (noise(), lp, bp, hp);
+                v += (float) (hp * 0.8 * std::exp (-time / 0.004) * (0.3 + sn));
+            }
+            else
+                v += (float) (std::exp (-time / 0.0008) * 0.4 * (0.3 + sn));          // the trigger pulse
+            // TONE: a low-pass on the output
+            const float c = (float) (0.05 + 0.95 * tn);
+            lpState += c * (v - lpState);
+            return lpState * 0.95f;
+        }
+        case Instrument::snare:
+        {
+            const double ph = st == 2 ? sweptPhase() : f0 * time;
+            const float body = (float) ((std::sin (twoPi * ph) * (0.4 + 0.4 * tn) + std::sin (twoPi * f1 * time) * (0.6 - 0.4 * tn))
+                                        * std::exp (-time / tauA));
+            f1s.process (noise(), lp, bp, hp);
+            const float n = (float) (hp * std::exp (-time / tauN) * (0.3 + 0.9 * sn));
+            return (body * 0.7f + n) * 0.85f;
+        }
+        case Instrument::clap:
+        {
+            f1s.process (noise(), lp, bp, hp);
+            if (st == 3)
+            {
+                // guiro: a scrape of little ridges
+                const double ridge = 0.5 + 0.5 * std::sin (twoPi * 55.0 * time);
+                return (float) (bp * 1.4 * ridge * (time < tauN ? 1.0 : std::exp (-(time - tauN) / 0.01)));
+            }
+            double env = 0.0;
+            for (int k = 0; k < 3; ++k)
+            {
+                const double tk = time - k * 0.010;
+                if (tk >= 0.0 && tk < 0.010) env += 1.0 - tk / 0.010;      // the saw envelope
+            }
+            if (time >= 0.03) env += std::exp (-(time - 0.03) / tauN);
+            return (float) (bp * 1.6 * env);
+        }
+        case Instrument::rim:
+        {
+            const double e = std::exp (-time / tauA);
+            float v = (float) ((std::sin (twoPi * f0 * time) * 0.6 + std::sin (twoPi * f1 * time) * 0.5) * e);
+            return v * 0.8f;
+        }
+        case Instrument::closedHat:
+        case Instrument::openHat:
+        case Instrument::crash:
+        case Instrument::ride:
+        {
+            float src = 0.0f;
+            if (st == 3) src = noise() * 0.8f;                                  // CR-78: noise
+            else
+            {
+                for (size_t k = 0; k < 6; ++k) src += square (metalF[k] * time, metalF[k] * dt);
+                src *= 0.18f;
+                src += noise() * 0.12f;
+            }
+            f1s.process (src, lp, bp, hp);
+            float a, b, c;
+            f2s.process (bp + hp * 0.4f, a, b, c);
+            const double env = std::exp (-time / tauA) * (1.0 + 1.2 * sn * std::exp (-time / 0.003));
+            float v = (float) (c * env) * 0.9f;
+            if (st == 2) v = sixBit (v * 2.0f) * 0.5f;                          // the 909's 6-bit cymbal samples
+            return v;
+        }
+        case Instrument::lowTom:
+        case Instrument::midTom:
+        case Instrument::highTom:
+        {
+            float v = (float) (std::sin (twoPi * sweptPhase()) * std::exp (-time / tauA));
+            if (st == 1 || st == 2)
+            {
+                f1s.process (noise(), lp, bp, hp);
+                v += (float) (bp * 0.15 * std::exp (-time / (tauA * 0.3)));
+            }
+            return v * 0.9f;
+        }
+        case Instrument::cowbell:
+        {
+            const float m = 0.5f * (square (f0 * time, f0 * dt) + square (f1 * time, f1 * dt));
+            f1s.process (m, lp, bp, hp);
+            const double env = time < 0.003 ? 1.0 : 0.35 * std::exp (-(time - 0.003) / tauA) + 0.65 * std::exp (-(time - 0.003) / 0.012);
+            return (float) (bp * env * 1.4);
+        }
+    }
+    return 0.0f;
+}
+
 float Voice::synth (double time) noexcept
 {
+    if (p.style > 0) return synthMachine (time);
     float lp, bp, hp;
     const double tn = p.tone, sn = p.snap;
 

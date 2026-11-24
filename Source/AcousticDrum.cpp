@@ -835,10 +835,18 @@ void AcousticDrum::renderChunk (float* out, int n) noexcept
             if (dacPhase >= 1.0)
             {
                 dacPhase -= std::floor (dacPhase);
-                const float a = juce::jlimit (0.0f, 1.0f, std::abs (o) * 0.8f);
-                const float c = std::log1p (255.0f * a) / std::log1p (255.0f);
-                const float q = std::round (c * 127.0f) / 127.0f;
-                dacHeld = std::copysign ((std::pow (256.0f, q) - 1.0f) / 255.0f / 0.8f, o);
+                if (model.machineBits >= 12)
+                {
+                    // a 12-bit linear converter (SP-1200, MPC60): finer, but the low-level grain is there
+                    dacHeld = std::round (juce::jlimit (-1.0f, 1.0f, o * 0.8f) * 2047.0f) / 2047.0f / 0.8f;
+                }
+                else
+                {
+                    const float a = juce::jlimit (0.0f, 1.0f, std::abs (o) * 0.8f);
+                    const float c = std::log1p (255.0f * a) / std::log1p (255.0f);
+                    const float q = std::round (c * 127.0f) / 127.0f;
+                    dacHeld = std::copysign ((std::pow (256.0f, q) - 1.0f) / 255.0f / 0.8f, o);
+                }
             }
             dacLp1 += (dacHeld - dacLp1) * dacCoef;
             dacLp2 += (dacLp1 - dacLp2) * dacCoef;

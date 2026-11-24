@@ -36,11 +36,14 @@ struct DrumModel
     uint32_t seed = 1;       // cymbals: which cymbal (its partials)
     float machine = 0.0f;    // > 0: heard as a drum machine's 8-bit companded sample played at this rate (Hz),
                              // the same every hit (LinnDrum, Oberheim DMX)
+    int machineBits = 8;     // the machine's word length: 8 = companded (LM-1, LinnDrum, DMX), 12 = linear (SP-1200, MPC60)
+    int analogStyle = 0;     // Kind::analog: 0 FULLER's own, 1 TR-808, 2 TR-909, 3 CR-78 (its circuits)
 
     bool operator== (const DrumModel& o) const noexcept
     {
         return kind == o.kind && analog == o.analog && pitch == o.pitch && ring == o.ring && bright == o.bright
-            && hard == o.hard && damp == o.damp && extra == o.extra && seed == o.seed && machine == o.machine;
+            && hard == o.hard && damp == o.damp && extra == o.extra && seed == o.seed && machine == o.machine
+            && machineBits == o.machineBits && analogStyle == o.analogStyle;
     }
 };
 

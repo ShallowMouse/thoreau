@@ -576,6 +576,151 @@ namespace
             all.push_back (k);
         }
 
+        //----------------------------------------------------------------------
+        // The analogue machines: their own circuits (DrumVoices.cpp)
+        auto analogKitOf = [&] (const char* name, const char* description, int style, std::array<const char*, kTracks> names,
+                                std::array<float, kTracks> levels, float roomSend)
+        {
+            KitDef k;
+            k.name = name;
+            k.description = description;
+            k.acoustic = false;
+            const float pans[kTracks] = { 0, 0, 0.1f, -0.15f, 0.25f, 0.25f, -0.35f, 0.0f, 0.35f, -0.3f, 0.3f, -0.2f };
+            for (int t = 0; t < kTracks; ++t)
+            {
+                auto& sl = k.slots[(size_t) t];
+                sl.name = names[(size_t) t];
+                sl.model.kind = Kind::analog;
+                sl.model.analog = instrumentOf (t);
+                sl.model.analogStyle = style;
+                sl.levelDb = levels[(size_t) t];
+                sl.pan = pans[t];
+                sl.close = 1.0f; sl.oh = 0.0f; sl.room = roomSend; sl.fx = 0.0f;
+                sl.midi = defaultMidiNote (t);
+            }
+            k.slots[4].chokes = 5;
+            k.compressor = compressor (5, 100, 3);
+            knobs (k, 0.0f, -60.0f, -14.0f, 0.0f, 0.0f);
+            return k;
+        };
+        {
+            auto k = analogKitOf ("TR-808",
+                "Roland TR-808 (1980): all analogue - the long, booming bridged-T kick, the two-resonator snare, the saw-envelope claps "
+                "and the six-oscillator hats, cymbal and cowbell.", 1,
+                { "BASS DRUM", "SNARE", "HANDCLAP", "RIMSHOT", "CL HIHAT", "OP HIHAT", "LOW TOM", "MID TOM", "HI TOM", "CYMBAL", "CYMBAL 2", "COWBELL" },
+                { 0, -2, -4, -7, -8, -9, -4, -4, -4, -10, -12, -9 }, 0.2f);
+            k.reverb = room (1.2f, 1.2f, 0.45f, 12.0f, 0.4f, 150.0f);
+            k.groove = groove (96.0, 50.0f,
+                Rows { "x.....x...x.....", "....x.......x...", _, _, "x.x.x.x.x.x.x.x.", _, _, _, _, _, _, _ },
+                Rows { "x.....x...x...x.", "....x.......x...", "............x...", _, "x.x.x.x.x.x.....", "..............o.", "..............x.", "............x...", "..........x.....", _, _, _ });
+            all.push_back (k);
+        }
+        {
+            auto k = analogKitOf ("TR-909",
+                "Roland TR-909 (1983): analogue kick, snare, toms and claps - the kick swept hard from high down, with its click - "
+                "and 6-bit sampled hats, crash and ride. House and techno.", 2,
+                { "BASS DRUM", "SNARE", "HANDCLAP", "RIMSHOT", "CL HIHAT", "OP HIHAT", "LOW TOM", "MID TOM", "HI TOM", "CRASH", "RIDE", "COWBELL" },
+                { 0, -2, -4, -7, -8, -9, -4, -4, -4, -9, -11, -12 }, 0.15f);
+            k.reverb = room (1.0f, 0.9f, 0.5f, 10.0f, 0.4f, 180.0f);
+            k.groove = groove (126.0, 50.0f,
+                Rows { "x...x...x...x...", "....x.......x...", "....x.......x...", _, _, "..o...o...o...o.", _, _, _, _, _, _ },
+                Rows { "x...x...x...x...", "....x.......xxxx", "....x.......x...", _, _, "..o...o...o.....", _, _, _, "x...............", _, _ });
+            all.push_back (k);
+        }
+        {
+            auto k = analogKitOf ("CR-78",
+                "Roland CompuRhythm CR-78 (1978): soft, short analogue voices - round kick, snare, rim, noise hats and cymbal, congas "
+                "and bongo, guiro, maracas and cowbell. In the Wall (Phil Collins), Blondie's Heart of Glass.", 3,
+                { "BASS DRUM", "SNARE", "GUIRO", "RIMSHOT", "HIHAT", "CYMBAL", "LOW CONGA", "HIGH CONGA", "BONGO", "CYMBAL 2", "MARACAS", "COWBELL" },
+                { 0, -3, -8, -6, -8, -10, -5, -5, -6, -11, -10, -9 }, 0.25f);
+            k.reverb = room (1.1f, 1.0f, 0.5f, 10.0f, 0.4f, 150.0f);
+            k.groove = groove (104.0, 50.0f,
+                Rows { "x.......x.......", "....x.......x...", _, _, "x.x.x.x.x.x.x.x.", _, _, "..x.....x.x.....", _, _, "xxxxxxxxxxxxxxxx", _ },
+                Rows { "x.......x.......", "....x.......x...", _, _, "x.x.x.x.x.x.x.x.", _, "........x.x.x...", "..x.........x...", "..............xx", _, "xxxxxxxxxxxxxxxx", _ });
+            all.push_back (k);
+        }
+
+        //----------------------------------------------------------------------
+        // The sampling machines
+        {
+            auto k = kit ("LM-1",
+                          "Linn LM-1 Drum Computer (1980), the first sampled drum machine: 8-bit samples of Art Wood's drums, tunable per voice. "
+                          "Prince, Michael Jackson, The Human League.",
+                          0.8f,
+                          { slot ("KICK", model (Kind::kick, 60, 0.25f, 0.45f, 0.7f, 0.8f, 0.5f, 121), 0, 36),
+                            slot ("SNARE", model (Kind::snare, 215, 0.28f, 0.55f, 0.65f, 0.55f, 0.55f, 122), -1, 38),
+                            claps (0.6f, -4),
+                            xstick (270, -4),
+                            closedHat (0.06f, 0.55f, 20, -8), openHat (0.6f, 0.55f, 20, -10),
+                            tom ("LOW TOM", 95, 0.4f, 0.5f, 0.6f, 0.6f, 0.2f, -2, 41),
+                            tom ("MID TOM", 130, 0.36f, 0.5f, 0.6f, 0.6f, 0.2f, -2, 45),
+                            tom ("HIGH TOM", 170, 0.32f, 0.52f, 0.6f, 0.6f, 0.2f, -2, 48),
+                            slot ("CONGA", model (Kind::tom, 220, 0.25f, 0.6f, 0.5f, 0.6f, 0.1f, 123), -6, 63),
+                            slot ("CABASA", model (Kind::tambourine, 100, 0.08f, 0.7f, 0.5f, 0.0f, 0.2f, 124), -12, 69),
+                            slot ("COWBELL", model (Kind::cowbell, 560, 0.3f, 0.6f, 0.6f, 0.0f, 0.0f, 125), -8, 56) });
+            machine (k, 28000.0f);
+            k.reverb = room (1.3f, 1.1f, 0.45f, 15.0f, 0.5f, 200.0f);
+            k.compressor = compressor (5, 100, 3);
+            k.bus = bus (1.0f, 1.0f, 30.0f, 16000.0f, 0.5f);
+            knobs (k, 0.0f, -60.0f, -10.0f, 0.25f, 0.1f);
+            k.groove = groove (112.0, 54.0f,
+                Rows { "x.....x...x.....", "....x.......x...", _, _, "x.xxx.xxx.xxx.xx", _, _, _, _, _, "x.x.x.x.x.x.x.x.", _ },
+                Rows { "x.....x...x.....", "....x.......x...", "....x.......x...", _, "x.xxx.xxx.xx....", "..............o.", "............x.x.", "........x.x.....", _, _, _, _ });
+            all.push_back (k);
+        }
+        {
+            auto k = kit ("SP-1200",
+                          "E-mu SP-1200 (1987): 12-bit samples at 26.04 kHz, ten seconds of them - the gritty, punchy boom-bap of "
+                          "late-80s and 90s hip-hop.",
+                          0.7f,
+                          { slot ("KICK", model (Kind::kick, 52, 0.4f, 0.4f, 0.85f, 0.7f, 0.7f, 131), 0, 36),
+                            slot ("SNARE", model (Kind::snare, 195, 0.3f, 0.6f, 0.8f, 0.5f, 0.7f, 132), -1, 38),
+                            claps (0.6f, -5),
+                            rimshot (310, 0.1f, 0.65f, -6),
+                            closedHat (0.06f, 0.5f, 21, -9), openHat (0.5f, 0.5f, 21, -11),
+                            tom ("LOW TOM", 85, 0.4f, 0.45f, 0.7f, 0.6f, 0.15f, -3, 41),
+                            tom ("MID TOM", 115, 0.36f, 0.45f, 0.7f, 0.6f, 0.15f, -3, 45),
+                            tom ("HIGH TOM", 150, 0.32f, 0.48f, 0.7f, 0.6f, 0.15f, -3, 48),
+                            crash (1.4f, 0.5f, 30, -11), ride (2.0f, 0.5f, 40, -12),
+                            tambourine (0.5f, -10) });
+            machine (k, 26040.0f, 0.1f);
+            for (auto& sl : k.slots) sl.model.machineBits = 12;
+            k.reverb = room (0.9f, 0.6f, 0.55f, 8.0f, 0.5f, 220.0f);
+            k.compressor = compressor (4, 90, 4, 0.2f);
+            k.bus = bus (2.5f, -1.0f, 30.0f, 12000.0f, 1.0f);
+            knobs (k, 0.0f, -60.0f, -16.0f, 0.45f, 0.15f);
+            k.groove = groove (92.0, 58.0f,
+                Rows { "x.........x.x...", "....x.......x...", _, _, "x.x.x.x.x.x.x.x.", _, _, _, _, _, _, _ },
+                Rows { "x.........x.x...", "....x.......x.x.", _, _, "x.x.x.x.x.x.x...", "..............o.", _, _, _, _, _, _ });
+            all.push_back (k);
+        }
+        {
+            auto k = kit ("MPC60",
+                          "Akai MPC60 (1988, Roger Linn): 12-bit samples at 40 kHz and Linn's swing - a fuller, rounder grain than the "
+                          "SP-1200. The pads that made a decade of hip-hop and R&B.",
+                          0.75f,
+                          { slot ("KICK", model (Kind::kick, 54, 0.38f, 0.45f, 0.8f, 0.7f, 0.65f, 141), 0, 36),
+                            slot ("SNARE", model (Kind::snare, 200, 0.3f, 0.62f, 0.75f, 0.5f, 0.65f, 142), -1, 38),
+                            claps (0.65f, -5),
+                            rimshot (300, 0.1f, 0.6f, -6),
+                            closedHat (0.06f, 0.55f, 22, -9), openHat (0.55f, 0.55f, 22, -11),
+                            tom ("LOW TOM", 88, 0.4f, 0.48f, 0.7f, 0.6f, 0.15f, -3, 41),
+                            tom ("MID TOM", 118, 0.36f, 0.48f, 0.7f, 0.6f, 0.15f, -3, 45),
+                            tom ("HIGH TOM", 155, 0.32f, 0.5f, 0.7f, 0.6f, 0.15f, -3, 48),
+                            crash (1.6f, 0.55f, 31, -11), ride (2.2f, 0.55f, 41, -12),
+                            slot ("SHAKER", model (Kind::tambourine, 100, 0.07f, 0.7f, 0.5f, 0.0f, 0.15f, 143), -11, 70) });
+            machine (k, 40000.0f, 0.12f);
+            for (auto& sl : k.slots) sl.model.machineBits = 12;
+            k.reverb = room (1.0f, 0.7f, 0.5f, 8.0f, 0.5f, 200.0f);
+            k.compressor = compressor (4, 100, 3, 0.15f);
+            k.bus = bus (2.0f, 0.0f, 30.0f, 16000.0f, 0.8f);
+            knobs (k, 0.0f, -60.0f, -15.0f, 0.35f, 0.1f);
+            k.groove = groove (94.0, 62.0f,
+                Rows { "x.......x.x.....", "....x.......x...", _, _, "x.x.x.x.x.x.x.x.", _, _, _, _, _, _, "..x...x...x...x." },
+                Rows { "x.......x.x...x.", "....x.......x...", _, _, "x.x.x.x.x.x.x...", "..............o.", _, _, _, _, _, _ });
+            all.push_back (k);
+        }
+
         return all;
     }
 }

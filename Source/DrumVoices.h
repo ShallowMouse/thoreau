@@ -25,6 +25,7 @@ struct VoiceParams
     float decay = 0.5f;
     float tone = 0.5f;
     float snap = 0.5f;
+    int style = 0;          // whose circuits: 0 FULLER's own, 1 TR-808, 2 TR-909, 3 CR-78
 };
 
 /** A loaded sample (mono; mixed down on load). Immutable once made. */
@@ -85,6 +86,8 @@ private:
     }
 
     float synth (double t) noexcept;       // one sample of the synthesised instrument at time t (s)
+    void triggerMachine (double tune, double decay, double tone, double snap) noexcept;   // the 808, 909, CR-78
+    float synthMachine (double t) noexcept;
     float sampled (double t) noexcept;     // one sample of the loaded sample at time t
     static float square (double phase, double inc) noexcept;   // band-limited (polyBLEP)
 
